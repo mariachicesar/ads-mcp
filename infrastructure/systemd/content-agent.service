@@ -1,0 +1,15 @@
+[Unit]
+Description=Content Agent MCP Service
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/ads-mcp
+ExecStart=/opt/ads-mcp/.venv/bin/python servers/content-agent/main.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
