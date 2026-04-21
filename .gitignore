@@ -21,3 +21,4 @@ Thumbs.db
 .idea/
 *.stackdump
 secrets.local.json
+local-dev-config.json

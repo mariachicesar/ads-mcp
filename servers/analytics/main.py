@@ -11,7 +11,8 @@ from fastapi.responses import JSONResponse
 from shared.auth import SignedRequestMiddleware
 from shared.errors import AdsMcpError
 from shared.models import ToolRequest
-from shared.responses import build_success_response
+from tools.read import get_traffic_overview as _get_traffic_overview
+from tools.read import get_top_pages as _get_top_pages
 
 app = FastAPI(title="GA4 MCP", version="0.1.0")
 app.add_middleware(SignedRequestMiddleware, service_name="analytics")
@@ -30,21 +31,17 @@ async def handle_ads_mcp_error(request: Request, exc: AdsMcpError) -> JSONRespon
 
 @app.get("/health")
 def health() -> dict:
-    return {"ok": True, "service": "analytics", "phase": "foundation"}
+    return {"ok": True, "service": "analytics", "phase": "v1"}
 
 
 @app.post("/tools/get_traffic_overview")
 def get_traffic_overview(request: ToolRequest, http_request: Request) -> dict:
-    return build_success_response(
-        service="analytics",
-        tool="get_traffic_overview",
-        mode="read",
-        business_key=request.businessKey,
-        request_id=getattr(http_request.state, "request_id", None),
-        summary="Placeholder GA4 overview response.",
-        data={"rows": [], "payload": request.payload},
-        freshness={"state": "live"},
-    )
+    return _get_traffic_overview(request, request_id=getattr(http_request.state, "request_id", None))
+
+
+@app.post("/tools/get_top_pages")
+def get_top_pages(request: ToolRequest, http_request: Request) -> dict:
+    return _get_top_pages(request, request_id=getattr(http_request.state, "request_id", None))
 
 
 if __name__ == "__main__":

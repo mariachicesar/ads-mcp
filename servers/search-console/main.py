@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from shared.auth import SignedRequestMiddleware
 from shared.errors import AdsMcpError
 from shared.models import ToolRequest
-from shared.responses import build_success_response
+from tools.read import get_search_performance as _get_search_performance
 
 app = FastAPI(title="Search Console MCP", version="0.1.0")
 app.add_middleware(SignedRequestMiddleware, service_name="search-console")
@@ -30,21 +30,12 @@ async def handle_ads_mcp_error(request: Request, exc: AdsMcpError) -> JSONRespon
 
 @app.get("/health")
 def health() -> dict:
-    return {"ok": True, "service": "search-console", "phase": "foundation"}
+    return {"ok": True, "service": "search-console", "phase": "v1"}
 
 
 @app.post("/tools/get_search_performance")
 def get_search_performance(request: ToolRequest, http_request: Request) -> dict:
-    return build_success_response(
-        service="search-console",
-        tool="get_search_performance",
-        mode="read",
-        business_key=request.businessKey,
-        request_id=getattr(http_request.state, "request_id", None),
-        summary="Placeholder Search Console response.",
-        data={"rows": [], "payload": request.payload},
-        freshness={"state": "live"},
-    )
+    return _get_search_performance(request, request_id=getattr(http_request.state, "request_id", None))
 
 
 if __name__ == "__main__":

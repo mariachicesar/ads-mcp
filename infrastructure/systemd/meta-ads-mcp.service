@@ -9,7 +9,11 @@ WorkingDirectory=/opt/ads-mcp
 ExecStart=/opt/ads-mcp/.venv/bin/python servers/meta-ads/main.py
 Restart=always
 RestartSec=5
+StandardOutput=append:/var/log/ads-mcp/meta-ads.log
+StandardError=append:/var/log/ads-mcp/meta-ads.log
 Environment=PYTHONUNBUFFERED=1
+Environment=AWS_REGION=us-east-1
+Environment=ADS_MCP_REQUIRE_SIGNED_REQUESTS=true
 
 [Install]
 WantedBy=multi-user.target
