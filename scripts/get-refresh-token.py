@@ -8,6 +8,7 @@ Or set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in your environment.
 """
 import os
 import sys
+os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 from google_auth_oauthlib.flow import InstalledAppFlow
 
 client_id = os.environ.get("GOOGLE_CLIENT_ID") or os.environ.get("CLIENT_ID")
@@ -31,7 +32,18 @@ flow = InstalledAppFlow.from_client_config(
         "https://www.googleapis.com/auth/adwords",
         "https://www.googleapis.com/auth/analytics.readonly",
         "https://www.googleapis.com/auth/webmasters.readonly",
+        "openid",
+        "email",
     ],
 )
-creds = flow.run_local_server(port=0)
+creds = flow.run_local_server(port=8085)
 print("Refresh token:", creds.refresh_token)
+
+# Verify which account this token belongs to
+import urllib.request, json as _json
+token_resp = urllib.request.urlopen(
+    f"https://www.googleapis.com/oauth2/v3/tokeninfo?access_token={creds.token}"
+)
+token_info = _json.loads(token_resp.read())
+print("Authorized account email:", token_info.get("email", "unknown"))
+print("Sub (user ID):", token_info.get("sub", "unknown"))

@@ -12,8 +12,7 @@ from pydantic import BaseModel
 from shared.auth import SignedRequestMiddleware
 from shared.errors import AdsMcpError
 from shared.responses import build_success_response
-
-BRANDS_DIR = Path(__file__).resolve().parent / "brands"
+from tools.write import write_google_ad as _write_google_ad, write_review_reply as _write_review_reply
 
 app = FastAPI(title="Content Agent MCP", version="0.1.0")
 app.add_middleware(SignedRequestMiddleware, service_name="content")
@@ -21,7 +20,9 @@ app.add_middleware(SignedRequestMiddleware, service_name="content")
 
 class ContentRequest(BaseModel):
     businessKey: str
-    contentType: str
+    contentType: str | None = None
+    payload: dict | None = None
+    # Legacy flat fields (still accepted for backwards compat)
     topic: str | None = None
     keyword: str | None = None
     city: str | None = None
@@ -38,34 +39,109 @@ async def handle_ads_mcp_error(request: Request, exc: AdsMcpError) -> JSONRespon
     )
 
 
+@app.exception_handler(RuntimeError)
+async def handle_runtime_error(request: Request, exc: RuntimeError) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={
+            "ok": False,
+            "service": "content",
+            "tool": "write_google_ad",
+            "errorCode": "SERVICE_UNAVAILABLE",
+            "message": str(exc),
+        },
+    )
+
+
 @app.get("/health")
 def health() -> dict:
-    return {"ok": True, "service": "content", "phase": "foundation"}
+    return {"ok": True, "service": "content", "phase": "live"}
 
 
 @app.post("/tools/write_google_ad")
 def write_google_ad(request: ContentRequest, http_request: Request) -> dict:
-    brand_file = BRANDS_DIR / f"{request.businessKey}.md"
-    brand_context = brand_file.read_text(encoding="utf-8") if brand_file.exists() else ""
+    request_id = getattr(http_request.state, "request_id", None)
+
+    # Merge payload dict with any flat legacy fields
+    payload = dict(request.payload or {})
+    if request.keyword and "keyword" not in payload:
+        payload["keyword"] = request.keyword
+    if request.city and "city" not in payload:
+        payload["city"] = request.city
+    if request.topic and "campaignGoal" not in payload:
+        payload["campaignGoal"] = request.topic
+
+    result = _write_google_ad(business_key=request.businessKey, payload=payload)
+
+    headline_count = len(result["headlines"])
+    desc_count = len(result["descriptions"])
+    summary = (
+        f"Generated {headline_count} headlines and {desc_count} descriptions "
+        f"for '{request.businessKey}' using {result['model']}."
+    )
+
     return build_success_response(
         service="content",
         tool="write_google_ad",
         mode="draft",
         business_key=request.businessKey,
-        request_id=getattr(http_request.state, "request_id", None),
-        summary="Placeholder content generation response.",
+        request_id=request_id,
+        summary=summary,
         data={
-            "contentType": request.contentType,
-            "topic": request.topic,
-            "keyword": request.keyword,
-            "city": request.city,
-            "brandContextLoaded": bool(brand_context),
-            "draft": {
-                "headlines": [],
-                "descriptions": [],
+            "contentType": request.contentType or "google_ad_rsa",
+            "headlines": result["headlines"],
+            "descriptions": result["descriptions"],
+            "warnings": result["warnings"],
+            "model": result["model"],
+            "usage": {
+                "inputTokens": result["inputTokens"],
+                "outputTokens": result["outputTokens"],
             },
         },
         requires_confirmation=False,
+        executed=False,
+    )
+
+
+class ReviewReplyRequest(BaseModel):
+    businessKey: str
+    reviewerName: str | None = None
+    starRating: str | int = "FIVE"
+    reviewText: str | None = None
+    existingReply: str | None = None
+    tone: str | None = None
+
+
+@app.post("/tools/write_review_reply")
+def write_review_reply(request: ReviewReplyRequest, http_request: Request) -> dict:
+    request_id = getattr(http_request.state, "request_id", None)
+
+    payload = {
+        "reviewerName": request.reviewerName,
+        "starRating": request.starRating,
+        "reviewText": request.reviewText,
+        "existingReply": request.existingReply,
+        "tone": request.tone or "professional and friendly",
+    }
+
+    result = _write_review_reply(business_key=request.businessKey, payload=payload)
+
+    return build_success_response(
+        service="content",
+        tool="write_review_reply",
+        mode="draft",
+        business_key=request.businessKey,
+        request_id=request_id,
+        summary=f"Generated review reply for '{request.businessKey}' using {result['model']}.",
+        data={
+            "reply": result["reply"],
+            "model": result["model"],
+            "usage": {
+                "inputTokens": result["inputTokens"],
+                "outputTokens": result["outputTokens"],
+            },
+        },
+        requires_confirmation=True,
         executed=False,
     )
 
