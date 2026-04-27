@@ -25,8 +25,15 @@ from fastmcp import FastMCP
 from pydantic import Field
 
 from shared.models import ToolRequest
-from tools.read import list_accounts, get_campaign_performance
-from tools.write import update_campaign_budget
+from tools.read import (
+    list_accounts,
+    get_campaign_performance,
+    list_campaigns,
+    get_ad_group_performance,
+    get_keyword_performance,
+    get_search_terms_report,
+)
+from tools.write import update_campaign_budget, set_campaign_status, set_ad_group_status
 
 mcp = FastMCP(
     name="google-ads",
@@ -81,6 +88,99 @@ def google_ads_update_campaign_budget(
         },
     )
     return update_campaign_budget(req, request_id=None)
+
+
+@mcp.tool()
+def google_ads_list_campaigns(
+    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+) -> dict:
+    """List all campaigns with status, daily budget, bidding strategy, and dates."""
+    req = ToolRequest(businessKey=business_key)
+    return list_campaigns(req, request_id=None)
+
+
+@mcp.tool()
+def google_ads_get_ad_group_performance(
+    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    date_range: Annotated[str, Field(description="Date range, e.g. 'LAST_30_DAYS', 'LAST_7_DAYS', 'THIS_MONTH'")] = "LAST_30_DAYS",
+    campaign_name: Annotated[str | None, Field(description="Optional: filter to a specific campaign name")] = None,
+) -> dict:
+    """Get performance metrics (impressions, clicks, cost, conversions, CTR, avg CPC) broken down by ad group."""
+    payload: dict = {"dateRange": date_range}
+    if campaign_name:
+        payload["campaignName"] = campaign_name
+    req = ToolRequest(businessKey=business_key, payload=payload)
+    return get_ad_group_performance(req, request_id=None)
+
+
+@mcp.tool()
+def google_ads_get_keyword_performance(
+    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    date_range: Annotated[str, Field(description="Date range, e.g. 'LAST_30_DAYS', 'LAST_7_DAYS', 'THIS_MONTH'")] = "LAST_30_DAYS",
+    campaign_name: Annotated[str | None, Field(description="Optional: filter to a specific campaign name")] = None,
+) -> dict:
+    """Get keyword-level performance including Quality Score, match type, impressions, clicks, cost, and avg CPC."""
+    payload: dict = {"dateRange": date_range}
+    if campaign_name:
+        payload["campaignName"] = campaign_name
+    req = ToolRequest(businessKey=business_key, payload=payload)
+    return get_keyword_performance(req, request_id=None)
+
+
+@mcp.tool()
+def google_ads_get_search_terms_report(
+    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    date_range: Annotated[str, Field(description="Date range, e.g. 'LAST_30_DAYS', 'LAST_7_DAYS', 'THIS_MONTH'")] = "LAST_30_DAYS",
+    campaign_name: Annotated[str | None, Field(description="Optional: filter to a specific campaign name")] = None,
+) -> dict:
+    """Get the search terms report — actual queries users typed that triggered your ads. Essential for finding new keywords and negative keywords."""
+    payload: dict = {"dateRange": date_range}
+    if campaign_name:
+        payload["campaignName"] = campaign_name
+    req = ToolRequest(businessKey=business_key, payload=payload)
+    return get_search_terms_report(req, request_id=None)
+
+
+@mcp.tool()
+def google_ads_set_campaign_status(
+    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    campaign_name: Annotated[str, Field(description="Exact campaign name as it appears in Google Ads")],
+    status: Annotated[str, Field(description="New status: 'ENABLED' or 'PAUSED'")],
+    dry_run: Annotated[bool, Field(description="If true, shows proposed changes without applying them. Always use true first.")] = True,
+) -> dict:
+    """Pause or enable a Google Ads campaign.
+
+    IMPORTANT: Always call with dry_run=true first. Show the user the proposed
+    changes and only call with dry_run=false after they explicitly approve.
+    Never pause the RnR Pasadena-San Marino campaign.
+    """
+    req = ToolRequest(
+        businessKey=business_key,
+        dryRun=dry_run,
+        payload={"campaignName": campaign_name, "status": status},
+    )
+    return set_campaign_status(req, request_id=None)
+
+
+@mcp.tool()
+def google_ads_set_ad_group_status(
+    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    ad_group_name: Annotated[str, Field(description="Exact ad group name as it appears in Google Ads")],
+    status: Annotated[str, Field(description="New status: 'ENABLED' or 'PAUSED'")],
+    campaign_name: Annotated[str | None, Field(description="Optional: campaign name to disambiguate if ad group name is not unique")] = None,
+    dry_run: Annotated[bool, Field(description="If true, shows proposed changes without applying them. Always use true first.")] = True,
+) -> dict:
+    """Pause or enable a Google Ads ad group.
+
+    IMPORTANT: Always call with dry_run=true first. Show the user the proposed
+    changes and only call with dry_run=false after they explicitly approve.
+    Never pause the RnR NoHo EV Charge ad group.
+    """
+    payload: dict = {"adGroupName": ad_group_name, "status": status}
+    if campaign_name:
+        payload["campaignName"] = campaign_name
+    req = ToolRequest(businessKey=business_key, dryRun=dry_run, payload=payload)
+    return set_ad_group_status(req, request_id=None)
 
 
 if __name__ == "__main__":

@@ -8,8 +8,15 @@ if str(ROOT) not in sys.path:
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from tools.read import list_accounts, get_campaign_performance
-from tools.write import update_campaign_budget
+from tools.read import (
+    list_accounts,
+    get_campaign_performance,
+    list_campaigns,
+    get_ad_group_performance,
+    get_keyword_performance,
+    get_search_terms_report,
+)
+from tools.write import update_campaign_budget, set_campaign_status, set_ad_group_status
 from shared.auth import SignedRequestMiddleware
 from shared.errors import AdsMcpError
 from shared.models import ToolRequest
@@ -47,6 +54,36 @@ def tool_get_campaign_performance(request: ToolRequest, http_request: Request) -
 @app.post("/tools/update_campaign_budget")
 def tool_update_campaign_budget(request: ToolRequest, http_request: Request) -> dict:
     return update_campaign_budget(request, getattr(http_request.state, "request_id", None))
+
+
+@app.post("/tools/list_campaigns")
+def tool_list_campaigns(request: ToolRequest, http_request: Request) -> dict:
+    return list_campaigns(request, getattr(http_request.state, "request_id", None))
+
+
+@app.post("/tools/get_ad_group_performance")
+def tool_get_ad_group_performance(request: ToolRequest, http_request: Request) -> dict:
+    return get_ad_group_performance(request, getattr(http_request.state, "request_id", None))
+
+
+@app.post("/tools/get_keyword_performance")
+def tool_get_keyword_performance(request: ToolRequest, http_request: Request) -> dict:
+    return get_keyword_performance(request, getattr(http_request.state, "request_id", None))
+
+
+@app.post("/tools/get_search_terms_report")
+def tool_get_search_terms_report(request: ToolRequest, http_request: Request) -> dict:
+    return get_search_terms_report(request, getattr(http_request.state, "request_id", None))
+
+
+@app.post("/tools/set_campaign_status")
+def tool_set_campaign_status(request: ToolRequest, http_request: Request) -> dict:
+    return set_campaign_status(request, getattr(http_request.state, "request_id", None))
+
+
+@app.post("/tools/set_ad_group_status")
+def tool_set_ad_group_status(request: ToolRequest, http_request: Request) -> dict:
+    return set_ad_group_status(request, getattr(http_request.state, "request_id", None))
 
 
 if __name__ == "__main__":

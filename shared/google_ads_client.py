@@ -156,6 +156,205 @@ def get_campaign_budget_snapshot(
     }
 
 
+def get_campaign_status_snapshot(
+    config: dict[str, Any],
+    *,
+    campaign_name: str,
+    tool: str | None = None,
+) -> dict[str, Any]:
+    client = build_google_ads_client(config, tool=tool)
+    customer_id = get_google_ads_customer_id(config, tool=tool)
+    google_ads_service = client.get_service("GoogleAdsService")
+
+    query = f"""
+        SELECT
+          campaign.id,
+          campaign.resource_name,
+          campaign.name,
+          campaign.status
+        FROM campaign
+        WHERE campaign.name = '{_escape_gaql_string(campaign_name)}'
+          AND campaign.status != 'REMOVED'
+        LIMIT 1
+    """
+
+    try:
+        response = google_ads_service.search(customer_id=customer_id, query=query)
+        row = next(iter(response), None)
+    except Exception as exc:
+        raise AdsMcpError(
+            status_code=502,
+            error_code="UPSTREAM_ERROR",
+            message="Google Ads campaign lookup failed.",
+            tool=tool,
+            retryable=True,
+            details={"reason": str(exc)},
+        ) from exc
+
+    if row is None:
+        raise AdsMcpError(
+            status_code=404,
+            error_code="REQUEST_INVALID",
+            message=f"Campaign '{campaign_name}' was not found in Google Ads.",
+            tool=tool,
+            details={"campaignName": campaign_name},
+        )
+
+    return {
+        "customerAccountId": customer_id,
+        "campaignId": str(row.campaign.id),
+        "campaignName": row.campaign.name,
+        "campaignResourceName": row.campaign.resource_name,
+        "currentStatus": row.campaign.status.name,
+    }
+
+
+def mutate_campaign_status(
+    config: dict[str, Any],
+    *,
+    campaign_resource_name: str,
+    new_status: str,
+    tool: str | None = None,
+) -> dict[str, Any]:
+    client = build_google_ads_client(config, tool=tool)
+    customer_id = get_google_ads_customer_id(config, tool=tool)
+
+    try:
+        protobuf_helpers = import_module("google.api_core.protobuf_helpers")
+        campaign_service = client.get_service("CampaignService")
+        operation = client.get_type("CampaignOperation")
+        campaign = operation.update
+        campaign.resource_name = campaign_resource_name
+        status_enum = client.enums.CampaignStatusEnum
+        campaign.status = getattr(status_enum, new_status)
+        client.copy_from(
+            operation.update_mask,
+            protobuf_helpers.field_mask(None, campaign._pb),
+        )
+        response = campaign_service.mutate_campaigns(
+            customer_id=customer_id,
+            operations=[operation],
+        )
+    except Exception as exc:
+        raise AdsMcpError(
+            status_code=502,
+            error_code="UPSTREAM_ERROR",
+            message="Google Ads campaign status update failed.",
+            tool=tool,
+            retryable=True,
+            details={"reason": str(exc)},
+        ) from exc
+
+    result = response.results[0] if response.results else None
+    return {
+        "customerAccountId": customer_id,
+        "campaignResourceName": getattr(result, "resource_name", campaign_resource_name),
+        "newStatus": new_status,
+    }
+
+
+def get_ad_group_status_snapshot(
+    config: dict[str, Any],
+    *,
+    ad_group_name: str,
+    campaign_name: str | None = None,
+    tool: str | None = None,
+) -> dict[str, Any]:
+    client = build_google_ads_client(config, tool=tool)
+    customer_id = get_google_ads_customer_id(config, tool=tool)
+    google_ads_service = client.get_service("GoogleAdsService")
+
+    query = f"""
+        SELECT
+          ad_group.id,
+          ad_group.resource_name,
+          ad_group.name,
+          ad_group.status,
+          campaign.name
+        FROM ad_group
+        WHERE ad_group.name = '{_escape_gaql_string(ad_group_name)}'
+          AND ad_group.status != 'REMOVED'
+    """
+    if campaign_name:
+        query += f" AND campaign.name = '{_escape_gaql_string(campaign_name)}'"
+    query += " LIMIT 1"
+
+    try:
+        response = google_ads_service.search(customer_id=customer_id, query=query)
+        row = next(iter(response), None)
+    except Exception as exc:
+        raise AdsMcpError(
+            status_code=502,
+            error_code="UPSTREAM_ERROR",
+            message="Google Ads ad group lookup failed.",
+            tool=tool,
+            retryable=True,
+            details={"reason": str(exc)},
+        ) from exc
+
+    if row is None:
+        raise AdsMcpError(
+            status_code=404,
+            error_code="REQUEST_INVALID",
+            message=f"Ad group '{ad_group_name}' was not found in Google Ads.",
+            tool=tool,
+            details={"adGroupName": ad_group_name, "campaignName": campaign_name},
+        )
+
+    return {
+        "customerAccountId": customer_id,
+        "adGroupId": str(row.ad_group.id),
+        "adGroupName": row.ad_group.name,
+        "adGroupResourceName": row.ad_group.resource_name,
+        "campaignName": row.campaign.name,
+        "currentStatus": row.ad_group.status.name,
+    }
+
+
+def mutate_ad_group_status(
+    config: dict[str, Any],
+    *,
+    ad_group_resource_name: str,
+    new_status: str,
+    tool: str | None = None,
+) -> dict[str, Any]:
+    client = build_google_ads_client(config, tool=tool)
+    customer_id = get_google_ads_customer_id(config, tool=tool)
+
+    try:
+        protobuf_helpers = import_module("google.api_core.protobuf_helpers")
+        ad_group_service = client.get_service("AdGroupService")
+        operation = client.get_type("AdGroupOperation")
+        ad_group = operation.update
+        ad_group.resource_name = ad_group_resource_name
+        status_enum = client.enums.AdGroupStatusEnum
+        ad_group.status = getattr(status_enum, new_status)
+        client.copy_from(
+            operation.update_mask,
+            protobuf_helpers.field_mask(None, ad_group._pb),
+        )
+        response = ad_group_service.mutate_ad_groups(
+            customer_id=customer_id,
+            operations=[operation],
+        )
+    except Exception as exc:
+        raise AdsMcpError(
+            status_code=502,
+            error_code="UPSTREAM_ERROR",
+            message="Google Ads ad group status update failed.",
+            tool=tool,
+            retryable=True,
+            details={"reason": str(exc)},
+        ) from exc
+
+    result = response.results[0] if response.results else None
+    return {
+        "customerAccountId": customer_id,
+        "adGroupResourceName": getattr(result, "resource_name", ad_group_resource_name),
+        "newStatus": new_status,
+    }
+
+
 def update_campaign_budget_amount(
     config: dict[str, Any],
     *,
