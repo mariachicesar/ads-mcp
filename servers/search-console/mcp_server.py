@@ -16,11 +16,12 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from typing import Annotated
+from typing import Annotated, Callable
 
 from fastmcp import FastMCP
 from pydantic import Field
 
+from shared.errors import AdsMcpError
 from shared.models import ToolRequest
 from tools.read import get_search_performance
 
@@ -34,6 +35,21 @@ mcp = FastMCP(
 )
 
 
+def _run_tool(tool_name: str, fn: Callable[[], dict]) -> dict:
+    try:
+        return fn()
+    except AdsMcpError as exc:
+        return exc.to_response(service="search-console", request_id=None)
+    except Exception as exc:
+        return AdsMcpError(
+            status_code=500,
+            error_code="INTERNAL_ERROR",
+            message="Unhandled tool error.",
+            tool=tool_name,
+            details={"reason": str(exc)},
+        ).to_response(service="search-console", request_id=None)
+
+
 @mcp.tool()
 def search_console_get_search_performance(
     business_key: Annotated[str, Field(description="Business key: 'rnr-electrician' or 'gq-painting'")],
@@ -43,7 +59,7 @@ def search_console_get_search_performance(
 ) -> dict:
     """Get organic search performance from Search Console: clicks, impressions, CTR, and average position."""
     req = ToolRequest(businessKey=business_key, payload={"dateRange": date_range, "dimension": dimension, "limit": limit})
-    return get_search_performance(req, request_id=None)
+    return _run_tool("search_console_get_search_performance", lambda: get_search_performance(req, request_id=None))
 
 
 if __name__ == "__main__":

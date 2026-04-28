@@ -64,7 +64,7 @@ Copy the structure below into `local-dev-config.json` (already gitignored) and f
     "client_secret": "...",
     "refresh_token": "...",
     "ga4_property_id": "...",
-    "site_url": "https://www.rnrelectrician.com/"
+    "site_url": "https://www.rnrelectrician.com"
   },
   "gq-painting": { "..." : "..." }
 }
@@ -109,7 +109,7 @@ Each server has a `mcp_server.py` that speaks the MCP stdio protocol. Add them t
       "command": "/absolute/path/to/.venv/bin/python",
       "args": ["/absolute/path/to/ads-mcp/servers/analytics/mcp_server.py"],
       "env": {
-        "ADS_MCP_GOOGLE_ADS_CONFIGS_JSON": "<paste contents of local-dev-config.json here>",
+        "ADS_MCP_ANALYTICS_CONFIGS_JSON": "<paste contents of local-dev-config.json here>",
         "ADS_MCP_REQUIRE_SIGNED_REQUESTS": "false"
       }
     },
@@ -117,7 +117,7 @@ Each server has a `mcp_server.py` that speaks the MCP stdio protocol. Add them t
       "command": "/absolute/path/to/.venv/bin/python",
       "args": ["/absolute/path/to/ads-mcp/servers/search-console/mcp_server.py"],
       "env": {
-        "ADS_MCP_GOOGLE_ADS_CONFIGS_JSON": "<paste contents of local-dev-config.json here>",
+        "ADS_MCP_SEARCH_CONSOLE_CONFIGS_JSON": "<paste contents of local-dev-config.json here>",
         "ADS_MCP_REQUIRE_SIGNED_REQUESTS": "false"
       }
     },
