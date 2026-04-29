@@ -25,18 +25,28 @@ def build_rule_check(
 def build_change(
     *,
     field: str,
-    label: str,
+    label: str | None = None,
     before: Any,
     after: Any,
-    status: str,
+    status: str = "proposed",
+    resource_type: str | None = None,
+    resource_id: str | None = None,
 ) -> dict[str, Any]:
-    return Change(
+    change = Change(
         field=field,
-        label=label,
+        label=label or field,
         before=before,
         after=after,
         status=status,
     ).model_dump()
+
+    # Optional identifiers used by some write handlers.
+    if resource_type is not None:
+        change["resourceType"] = resource_type
+    if resource_id is not None:
+        change["resourceId"] = resource_id
+
+    return change
 
 
 def build_success_response(

@@ -44,11 +44,27 @@ def _has_any_key(payload: dict[str, Any], keys: set[str]) -> bool:
 def evaluate_google_ads_mutation_rules(
     *,
     business_key: str,
-    payload: dict[str, Any],
+    payload: dict[str, Any] | None = None,
+    context: dict[str, Any] | None = None,
     campaign_name: str | None = None,
     ad_group_name: str | None = None,
     change_type: str | None = None,
 ) -> list[dict[str, Any]]:
+    # Backward-compatible normalization: older write handlers pass `context`
+    # while newer handlers pass `payload` plus explicit campaign/ad group args.
+    normalized_payload = payload or context or {}
+
+    if campaign_name is None:
+        campaign_name = (
+            normalized_payload.get("campaignName")
+            or normalized_payload.get("campaign_name")
+        )
+    if ad_group_name is None:
+        ad_group_name = (
+            normalized_payload.get("adGroupName")
+            or normalized_payload.get("ad_group_name")
+        )
+
     rules = GOOGLE_ADS_RULES.get(business_key, {})
     rule_checks: list[dict[str, Any]] = []
 
@@ -83,7 +99,7 @@ def evaluate_google_ads_mutation_rules(
         )
 
     if rules.get("lock_geo_changes"):
-        if change_type == "geo" or _has_any_key(payload, GEO_MUTATION_KEYS):
+        if change_type == "geo" or _has_any_key(normalized_payload, GEO_MUTATION_KEYS):
             rule_checks.append(
                 build_rule_check(
                     rule="geo-target-lock",
@@ -94,7 +110,7 @@ def evaluate_google_ads_mutation_rules(
             )
 
     if rules.get("keyword_changes_require_explicit_approval"):
-        if change_type == "keywords" or _has_any_key(payload, KEYWORD_MUTATION_KEYS):
+        if change_type == "keywords" or _has_any_key(normalized_payload, KEYWORD_MUTATION_KEYS):
             rule_checks.append(
                 build_rule_check(
                     rule="keyword-approval-required",
@@ -105,7 +121,7 @@ def evaluate_google_ads_mutation_rules(
             )
 
     if rules.get("campaign_structure_requires_explicit_approval"):
-        if change_type == "campaign-structure" or _has_any_key(payload, STRUCTURE_MUTATION_KEYS):
+        if change_type == "campaign-structure" or _has_any_key(normalized_payload, STRUCTURE_MUTATION_KEYS):
             rule_checks.append(
                 build_rule_check(
                     rule="campaign-structure-lock",
