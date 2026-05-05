@@ -42,6 +42,7 @@ from tools.read import (
     get_conversion_actions,
     get_change_history,
     get_recommendations,
+    get_negative_keywords,
 )
 from tools.write import (
     update_campaign_budget,
@@ -53,6 +54,7 @@ from tools.write import (
     create_rsa,
     update_campaign_bidding_strategy,
 )
+from tools.knowledge import query_ads_knowledge
 
 mcp = FastMCP(
     name="google-ads",
@@ -107,6 +109,7 @@ def google_ads_update_campaign_budget(
     campaign_name: Annotated[str, Field(description="Exact campaign name as it appears in Google Ads")],
     new_daily_budget: Annotated[float, Field(description="New daily budget in USD, e.g. 15.00")],
     dry_run: Annotated[bool, Field(description="If true, shows proposed changes without applying them. Always use true first.")] = True,
+    approval_id: Annotated[str | None, Field(description="Required for execute mode (dry_run=false). Copy from the dry-run response.")] = None,
 ) -> dict:
     """Update the daily budget for a Google Ads campaign.
 
@@ -116,6 +119,7 @@ def google_ads_update_campaign_budget(
     req = ToolRequest(
         businessKey=business_key,
         dryRun=dry_run,
+        approvalId=approval_id,
         payload={
             "campaignName": campaign_name,
             "newDailyBudget": new_daily_budget,
@@ -181,6 +185,7 @@ def google_ads_set_campaign_status(
     campaign_name: Annotated[str, Field(description="Exact campaign name as it appears in Google Ads")],
     status: Annotated[str, Field(description="New status: 'ENABLED' or 'PAUSED'")],
     dry_run: Annotated[bool, Field(description="If true, shows proposed changes without applying them. Always use true first.")] = True,
+    approval_id: Annotated[str | None, Field(description="Required for execute mode (dry_run=false). Copy from the dry-run response.")] = None,
 ) -> dict:
     """Pause or enable a Google Ads campaign.
 
@@ -191,6 +196,7 @@ def google_ads_set_campaign_status(
     req = ToolRequest(
         businessKey=business_key,
         dryRun=dry_run,
+        approvalId=approval_id,
         payload={"campaignName": campaign_name, "status": status},
     )
     return _run_tool("google_ads_set_campaign_status", lambda: set_campaign_status(req, request_id=None))
@@ -203,6 +209,7 @@ def google_ads_set_ad_group_status(
     status: Annotated[str, Field(description="New status: 'ENABLED' or 'PAUSED'")],
     campaign_name: Annotated[str | None, Field(description="Optional: campaign name to disambiguate if ad group name is not unique")] = None,
     dry_run: Annotated[bool, Field(description="If true, shows proposed changes without applying them. Always use true first.")] = True,
+    approval_id: Annotated[str | None, Field(description="Required for execute mode (dry_run=false). Copy from the dry-run response.")] = None,
 ) -> dict:
     """Pause or enable a Google Ads ad group.
 
@@ -213,7 +220,7 @@ def google_ads_set_ad_group_status(
     payload: dict = {"adGroupName": ad_group_name, "status": status}
     if campaign_name:
         payload["campaignName"] = campaign_name
-    req = ToolRequest(businessKey=business_key, dryRun=dry_run, payload=payload)
+    req = ToolRequest(businessKey=business_key, dryRun=dry_run, approvalId=approval_id, payload=payload)
     return _run_tool("google_ads_set_ad_group_status", lambda: set_ad_group_status(req, request_id=None))
 
 
@@ -323,6 +330,16 @@ def google_ads_get_recommendations(
     """Get Google's optimization recommendations for the account (budget increases, bid adjustments, keyword suggestions, etc.)."""
     req = ToolRequest(businessKey=business_key)
     return _run_tool("google_ads_get_recommendations", lambda: get_recommendations(req, request_id=None))
+
+
+@mcp.tool()
+def google_ads_get_negative_keywords(
+    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    campaign_name: Annotated[str | None, Field(description="Optional: filter to a specific campaign. Omit to return all campaigns.")] = None,
+) -> dict:
+    """List all negative keywords on a campaign (or all campaigns). Use this before adding a negative to check for duplicates."""
+    req = ToolRequest(businessKey=business_key, payload={"campaignName": campaign_name} if campaign_name else {})
+    return _run_tool("google_ads_get_negative_keywords", lambda: get_negative_keywords(req, request_id=None))
 
 
 @mcp.tool()
@@ -452,6 +469,19 @@ def google_ads_update_campaign_bidding_strategy(
         "google_ads_update_campaign_bidding_strategy",
         lambda: update_campaign_bidding_strategy(req, request_id=None),
     )
+
+
+@mcp.tool()
+def google_ads_query_knowledge(
+    topic: Annotated[str, Field(description="Topic to search for, e.g. 'smart bidding', 'quality score', 'negative keywords', 'budget'")],
+) -> dict:
+    """Search the Google Ads knowledge base for tactics and insights learned from educational videos.
+
+    Use this when the user asks for advice, best practices, or how to improve their campaigns.
+    The knowledge base is built from videos ingested via: python scripts/ingest_video.py <url>
+    Returns Key Tactics and Summary sections only (not full transcripts).
+    """
+    return _run_tool("google_ads_query_knowledge", lambda: query_ads_knowledge(topic))
 
 
 if __name__ == "__main__":

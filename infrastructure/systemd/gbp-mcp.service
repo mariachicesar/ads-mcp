@@ -1,0 +1,19 @@
+[Unit]
+Description=Google Business Profile MCP Service
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/ads-mcp
+ExecStart=/opt/ads-mcp/.venv/bin/python servers/gbp/mcp_server.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/ads-mcp/gbp.log
+StandardError=append:/var/log/ads-mcp/gbp.log
+Environment=PYTHONUNBUFFERED=1
+Environment=AWS_REGION=us-east-1
+Environment=ADS_MCP_REQUIRE_SIGNED_REQUESTS=true
+
+[Install]
+WantedBy=multi-user.target

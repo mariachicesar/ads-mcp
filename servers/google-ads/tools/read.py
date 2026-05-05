@@ -238,8 +238,6 @@ def list_campaigns(request: ToolRequest, request_id: str | None) -> dict:
           campaign.status,
           campaign.advertising_channel_type,
           campaign.bidding_strategy_type,
-          campaign.start_date,
-          campaign.end_date,
           campaign_budget.amount_micros
         FROM campaign
         WHERE campaign.status != 'REMOVED'
@@ -257,8 +255,6 @@ def list_campaigns(request: ToolRequest, request_id: str | None) -> dict:
                 "status": row.campaign.status.name,
                 "channel_type": row.campaign.advertising_channel_type.name,
                 "bidding_strategy": row.campaign.bidding_strategy_type.name,
-                "start_date": row.campaign.start_date,
-                "end_date": row.campaign.end_date or None,
                 "daily_budget": row.campaign_budget.amount_micros / 1_000_000,
                 "daily_budget_micros": int(row.campaign_budget.amount_micros),
             })
@@ -722,7 +718,7 @@ def get_ad_performance(request: ToolRequest, request_id: str | None) -> dict:
           ad_group.id,
           ad_group.name,
           ad_group_ad.ad.id,
-          ad_group_ad.ad.type_,
+          ad_group_ad.ad.type,
           ad_group_ad.ad.name,
           ad_group_ad.ad.responsive_search_ad.headlines,
           ad_group_ad.ad.responsive_search_ad.descriptions,
@@ -1312,3 +1308,78 @@ def get_recommendations(request: ToolRequest, request_id: str | None) -> dict:
         data={"customerId": customer_id, "rows": rows},
         freshness={"state": "live"},
     )
+
+
+def get_negative_keywords(request: ToolRequest, request_id: str | None) -> dict:
+    config = load_google_ads_sdk_config(
+        business_key=request.businessKey,
+        tool="get_negative_keywords",
+    )
+    client, customer_id = _resolve_working_client(config, "get_negative_keywords")
+    google_ads_service = client.get_service("GoogleAdsService")
+
+    payload = request.payload or {}
+    campaign_name = payload.get("campaignName")
+
+    query = """
+        SELECT
+          campaign.id,
+          campaign.name,
+          campaign_criterion.criterion_id,
+          campaign_criterion.keyword.text,
+          campaign_criterion.keyword.match_type,
+          campaign_criterion.negative,
+          campaign_criterion.status
+        FROM campaign_criterion
+        WHERE campaign_criterion.negative = TRUE
+          AND campaign_criterion.type = KEYWORD
+          AND campaign.status != 'REMOVED'
+    """
+    if campaign_name:
+        query += f" AND campaign.name = '{_escape_gaql_string(campaign_name)}'"
+    query += " ORDER BY campaign.name, campaign_criterion.keyword.text"
+
+    try:
+        response = google_ads_service.search(customer_id=customer_id, query=query)
+        rows = []
+        for row in response:
+            rows.append({
+                "campaign_name": row.campaign.name,
+                "campaign_id": str(row.campaign.id),
+                "criterion_id": str(row.campaign_criterion.criterion_id),
+                "keyword_text": row.campaign_criterion.keyword.text,
+                "match_type": row.campaign_criterion.keyword.match_type.name,
+                "status": row.campaign_criterion.status.name,
+            })
+    except Exception as exc:
+        raise AdsMcpError(
+            status_code=502,
+            error_code="UPSTREAM_ERROR",
+            message="Google Ads negative keywords query failed.",
+            tool="get_negative_keywords",
+            retryable=True,
+            details={"reason": str(exc)},
+        ) from exc
+
+    # Group by campaign for easier reading
+    by_campaign: dict[str, list] = {}
+    for row in rows:
+        by_campaign.setdefault(row["campaign_name"], []).append(row)
+
+    return build_success_response(
+        service=SERVICE_NAME,
+        tool="get_negative_keywords",
+        mode="read",
+        business_key=request.businessKey,
+        request_id=request_id,
+        summary=f"{len(rows)} negative keywords across {len(by_campaign)} campaign(s).",
+        data={
+            "campaignFilter": campaign_name,
+            "customerId": customer_id,
+            "total": len(rows),
+            "byCampaign": by_campaign,
+            "rows": rows,
+        },
+        freshness={"state": "live"},
+    )
+

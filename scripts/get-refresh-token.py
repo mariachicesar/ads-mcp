@@ -32,6 +32,7 @@ flow = InstalledAppFlow.from_client_config(
         "https://www.googleapis.com/auth/adwords",
         "https://www.googleapis.com/auth/analytics.readonly",
         "https://www.googleapis.com/auth/webmasters.readonly",
+        "https://www.googleapis.com/auth/business.manage",
         "openid",
         "email",
     ],

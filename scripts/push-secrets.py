@@ -127,6 +127,19 @@ def main() -> None:
         else:
             print(f"  SKIP search-console — no site_url in config for {business_key}")
 
+        # GBP config — push only if gbp_account_id and gbp_location_id are set
+        if creds.get("gbp_account_id") and creds.get("gbp_location_id"):
+            gbp_secret = {
+                "client_id": creds["client_id"],
+                "client_secret": creds["client_secret"],
+                "refresh_token": creds["refresh_token"],
+                "gbp_account_id": creds["gbp_account_id"],
+                "gbp_location_id": creds["gbp_location_id"],
+            }
+            aws_put_secret(f"/ads-mcp/{business_key}/gbp/config", gbp_secret, args.dry_run)
+        else:
+            print(f"  SKIP gbp — no gbp_account_id/gbp_location_id in config for {business_key}")
+
         print()
 
     print("Done.")

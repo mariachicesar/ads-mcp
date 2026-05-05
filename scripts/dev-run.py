@@ -14,6 +14,7 @@ SERVICES = [
     ("analytics",     "servers/analytics/main.py",     8003),
     ("search-console","servers/search-console/main.py",8004),
     ("content-agent", "servers/content-agent/main.py", 8005),
+    ("gbp",           "servers/gbp/main.py",           8006),
 ]
 
 ROOT_PATH = pathlib.Path(ROOT)
@@ -42,6 +43,9 @@ if dev_config_path.exists():
 
     # search-console: keys match (site_url, client_id, client_secret, refresh_token)
     env["ADS_MCP_SEARCH_CONSOLE_CONFIGS_JSON"] = json.dumps(raw)
+
+    # gbp: keys match (client_id, client_secret, refresh_token, gbp_account_id, gbp_location_id)
+    env["ADS_MCP_GBP_CONFIGS_JSON"] = json.dumps(raw)
 
     print(f"  loaded local-dev-config.json ({len(raw)} business keys: {', '.join(raw.keys())})")  
 else:

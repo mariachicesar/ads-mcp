@@ -1,0 +1,11 @@
+# Requirements for video ingestion script (scripts/ingest_video.py)
+# Install in your project venv: pip install -r scripts/requirements-ingest.txt
+#
+# IMPORTANT: ffmpeg must also be installed on your system (not via pip):
+#   Windows:  winget install ffmpeg   OR   choco install ffmpeg
+#   Mac:      brew install ffmpeg
+#   Ubuntu:   sudo apt install ffmpeg
+
+yt-dlp>=2024.1.0
+openai-whisper>=20231117
+anthropic>=0.25.0

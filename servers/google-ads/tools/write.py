@@ -17,6 +17,7 @@ from shared.google_ads_client import (
 from shared.responses import build_change, build_success_response
 from shared.rules import evaluate_google_ads_mutation_rules
 from shared.runtime_config import load_google_ads_sdk_config
+from tools.read import get_negative_keywords
 
 
 SERVICE_NAME = "google-ads"
@@ -414,6 +415,41 @@ def add_negative_keyword(request, request_id: str | None) -> dict:
             error_code="REQUEST_INVALID",
             message=f"matchType must be one of: {', '.join(sorted(_VALID_MATCH_TYPES))}.",
             tool="add_negative_keyword",
+        )
+
+    # Duplicate check — fetch existing negatives for this campaign
+    duplicate_info = None
+    try:
+        from shared.models import ToolRequest as _ToolRequest
+        neg_request = _ToolRequest(
+            businessKey=request.businessKey,
+            payload={"campaignName": campaign_name},
+        )
+        neg_result = get_negative_keywords(neg_request, request_id=None)
+        existing = neg_result.get("data", {}).get("rows", [])
+        for existing_kw in existing:
+            if (
+                existing_kw["keyword_text"].lower() == keyword_text.lower()
+                and existing_kw["match_type"] == match_type
+                and existing_kw["campaign_name"] == campaign_name
+            ):
+                duplicate_info = existing_kw
+                break
+    except Exception:
+        # Non-fatal — if duplicate check fails, proceed anyway
+        pass
+
+    if duplicate_info:
+        raise AdsMcpError(
+            status_code=409,
+            error_code="DUPLICATE",
+            message=(
+                f"Negative keyword '{keyword_text}' [{match_type}] already exists "
+                f"in campaign '{campaign_name}' (criterion_id: {duplicate_info['criterion_id']})."
+            ),
+            tool="add_negative_keyword",
+            retryable=False,
+            details={"existing": duplicate_info},
         )
 
     rule_context = {

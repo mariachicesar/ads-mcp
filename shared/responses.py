@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from shared.models import Change, RuleCheck
@@ -79,6 +80,8 @@ def build_success_response(
         "requiresConfirmation": requires_confirmation,
         "executed": executed,
     }
+    if requires_confirmation and "dry" in mode:
+        response["approvalId"] = str(uuid.uuid4())
     if freshness is not None:
         response["freshness"] = freshness
     if warnings:
