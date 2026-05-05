@@ -94,6 +94,8 @@ def main() -> None:
         print(f"AWS identity: {identity.get('Arn')}\n")
 
     for business_key, creds in config.items():
+        if not isinstance(creds, dict):
+            continue  # skip top-level non-business entries (e.g. anthropic_api_key)
         print(f"Business: {business_key}")
 
         # Google Ads config — always push
