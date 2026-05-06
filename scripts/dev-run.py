@@ -15,6 +15,7 @@ SERVICES = [
     ("search-console","servers/search-console/main.py",8004),
     ("content-agent", "servers/content-agent/main.py", 8005),
     ("gbp",           "servers/gbp/main.py",           8006),
+    ("orchestrator",  "servers/orchestrator/main.py",  8007),
 ]
 
 ROOT_PATH = pathlib.Path(ROOT)

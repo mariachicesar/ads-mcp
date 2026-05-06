@@ -49,7 +49,7 @@ sudo nginx -t && sudo systemctl reload nginx
 
 echo "==> Verifying HTTPS health endpoints"
 sleep 2
-for path in google-ads meta-ads analytics search-console content; do
+for path in google-ads meta-ads analytics search-console content gbp orchestrator; do
     status=$(curl -s -o /dev/null -w "%{http_code}" "https://$DOMAIN/$path/health" 2>/dev/null || echo "ERR")
     echo "  https://$DOMAIN/$path/health -> $status"
 done

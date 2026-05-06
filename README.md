@@ -22,6 +22,7 @@ Phase 1 scaffolds:
 - Search Console MCP server
 - Content Agent MCP server
 - Google Business Profile MCP server
+- Cross-agent Orchestrator MCP server
 - AWS EC2 + Nginx + systemd deployment assets
 - OAuth/bootstrap/helper scripts
 - Integration contract docs for the existing dashboard/backend
@@ -90,7 +91,7 @@ export ADS_MCP_REQUIRE_SIGNED_REQUESTS=false
 python scripts/dev-run.py
 ```
 
-All six servers start on ports 8001–8006 with signed-request validation disabled. Ctrl+C stops them all.
+All seven servers start on ports 8001-8007 with signed-request validation disabled. Ctrl+C stops them all.
 
 ---
 
@@ -144,6 +145,13 @@ Each server has a `mcp_server.py` that speaks the MCP stdio protocol. Add them t
         "ADS_MCP_GBP_CONFIGS_JSON": "<paste contents of local-dev-config.json here>",
         "ADS_MCP_REQUIRE_SIGNED_REQUESTS": "false"
       }
+    },
+    "orchestrator": {
+      "command": "/absolute/path/to/.venv/bin/python",
+      "args": ["/absolute/path/to/ads-mcp/servers/orchestrator/mcp_server.py"],
+      "env": {
+        "ADS_MCP_REQUIRE_SIGNED_REQUESTS": "false"
+      }
     }
   }
 }
@@ -163,7 +171,7 @@ On **Windows**, use the `.venv\Scripts\python.exe` path and backslashes in paths
 ### 1. First-time bootstrap
 
 ```bash
-# Git Bash — requires rsync (not available in plain PowerShell)
+# Git Bash
 bash infrastructure/setup-ec2.sh
 ```
 
@@ -191,7 +199,7 @@ Secrets are written to `/ads-mcp/{business-key}/{platform}/config` for each busi
 ### 3. Deploy latest code
 
 ```bash
-# Git Bash — deploy.sh uses rsync which requires bash
+# Git Bash
 bash scripts/deploy.sh
 ```
 
@@ -217,10 +225,90 @@ Each service exposes a `/health` endpoint:
 | Service | Port |
 |---|---|
 | google-ads | 8001 |
+| meta-ads | 8002 |
 | analytics | 8003 |
 | search-console | 8004 |
 | content-agent | 8005 |
 | gbp | 8006 |
+| orchestrator | 8007 |
+
+### Remote HTTPS snippets (backend-rc + Claude Desktop)
+
+Use these snippets to standardize on the deployed remote base URL:
+
+### Developer onboarding: add MCP by URL
+
+Use this when a developer's MCP client supports URL-based remote servers.
+
+1. Add the remote server config in the client config file:
+
+```json
+{
+  "mcpServers": {
+    "ads-mcp-remote": {
+      "url": "https://mcp.rctechbridge.com/orchestrator/",
+      "headers": {
+        "X-Environment": "production"
+      }
+    }
+  }
+}
+```
+
+2. Restart the MCP client.
+
+3. Validate connectivity with health checks:
+
+```bash
+curl -sS https://mcp.rctechbridge.com/health
+curl -sS https://mcp.rctechbridge.com/orchestrator/health
+```
+
+4. Run dry-run tools first, then route execute/write operations through backend-rc for approvals and signatures.
+
+If a client does not support URL-based MCP servers yet, use local stdio server config (`command` + `args`) and keep backend traffic pointed at `https://mcp.rctechbridge.com`.
+
+```bash
+# backend-rc environment
+ADS_MCP_BASE_URL=https://mcp.rctechbridge.com
+ADS_MCP_TIMEOUT_SECONDS=30
+```
+
+```json
+{
+  "mcpRequest": {
+    "tenantId": 12,
+    "businessKey": "rnr-electrician",
+    "requestedBy": 44,
+    "dryRun": true,
+    "payload": {
+      "campaignName": "Main Search",
+      "newDailyBudget": 20
+    },
+    "requestMeta": {
+      "actionRequestId": "mar_123",
+      "source": "backend-rc"
+    }
+  }
+}
+```
+
+```bash
+# backend-rc -> ads-mcp dry-run example
+curl -X POST "https://mcp.rctechbridge.com/google-ads/tools/update_campaign_budget" \
+  -H "Content-Type: application/json" \
+  -H "X-AdsMcp-Signature: <backend-generated-signature>" \
+  -d '{
+    "tenantId": 12,
+    "businessKey": "rnr-electrician",
+    "requestedBy": 44,
+    "dryRun": true,
+    "payload": {
+      "campaignName": "Main Search",
+      "newDailyBudget": 20
+    }
+  }'
+```
 
 ### Scheduled GBP posts (cron)
 

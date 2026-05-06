@@ -1,16 +1,16 @@
 [Unit]
-Description=Google Business Profile MCP Service
+Description=Orchestrator MCP Service
 After=network.target
 
 [Service]
 Type=simple
 User=ubuntu
 WorkingDirectory=/opt/ads-mcp
-ExecStart=/opt/ads-mcp/.venv/bin/python servers/gbp/main.py
+ExecStart=/opt/ads-mcp/.venv/bin/python servers/orchestrator/main.py
 Restart=always
 RestartSec=5
-StandardOutput=append:/var/log/ads-mcp/gbp.log
-StandardError=append:/var/log/ads-mcp/gbp.log
+StandardOutput=append:/var/log/ads-mcp/orchestrator.log
+StandardError=append:/var/log/ads-mcp/orchestrator.log
 Environment=PYTHONUNBUFFERED=1
 Environment=AWS_REGION=us-east-1
 Environment=ADS_MCP_REQUIRE_SIGNED_REQUESTS=true

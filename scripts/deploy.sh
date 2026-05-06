@@ -13,26 +13,24 @@ REMOTE_HOST=${REMOTE_HOST:-ubuntu@52.21.17.69}
 REMOTE_DIR=${REMOTE_DIR:-/opt/ads-mcp}
 IDENTITY=${IDENTITY:-~/.ssh/rd-mcp-key.pem}
 VENV="$REMOTE_DIR/.venv"
+UPDATE_NGINX=${UPDATE_NGINX:-false}
 
 SSH="ssh -i $IDENTITY -o StrictHostKeyChecking=no"
 SCP="scp -i $IDENTITY"
-RSYNC_SSH="ssh -i $IDENTITY -o StrictHostKeyChecking=no"
-
 echo "==> Syncing code to ${REMOTE_HOST}:${REMOTE_DIR}"
-rsync -az --delete \
-    --exclude '.venv' \
-    --exclude '__pycache__' \
-    --exclude '*.pyc' \
-    --exclude '.git' \
-    --exclude 'local-dev-config.json' \
-    --exclude '.env' \
-    -e "$RSYNC_SSH" \
-    ./ "${REMOTE_HOST}:${REMOTE_DIR}/"
+tar -czf - \
+    --exclude='./.venv' \
+    --exclude='./__pycache__' \
+    --exclude='./*.pyc' \
+    --exclude='./.git' \
+    --exclude='./local-dev-config.json' \
+    --exclude='./.env' \
+    . | $SSH "$REMOTE_HOST" "mkdir -p $REMOTE_DIR && tar -xzf - -C $REMOTE_DIR"
 
 echo "==> Installing/updating Python dependencies"
 $SSH "$REMOTE_HOST" bash -s <<ENDSSH
 set -e
-for svc in google-ads meta-ads analytics search-console content-agent; do
+for svc in google-ads meta-ads analytics search-console content-agent gbp orchestrator; do
     req="$REMOTE_DIR/servers/\$svc/requirements.txt"
     if [[ -f "\$req" ]]; then
         "$VENV/bin/pip" install --quiet -r "\$req"
@@ -55,22 +53,26 @@ ENDSSH
 echo "==> Restarting services"
 $SSH "$REMOTE_HOST" bash -s <<ENDSSH
 set -e
-for svc in google-ads-mcp meta-ads-mcp analytics-mcp search-console-mcp content-agent; do
+for svc in google-ads-mcp meta-ads-mcp analytics-mcp search-console-mcp content-agent gbp-mcp orchestrator-mcp; do
     sudo systemctl restart "\$svc" && echo "  restarted \$svc" || echo "  WARNING: failed to restart \$svc"
 done
 ENDSSH
 
-echo "==> Reloading Nginx"
-$SSH "$REMOTE_HOST" bash -s <<ENDSSH
+if [[ "$UPDATE_NGINX" == "true" ]]; then
+    echo "==> Reloading Nginx from repo template"
+    $SSH "$REMOTE_HOST" bash -s <<ENDSSH
 sudo cp $REMOTE_DIR/infrastructure/nginx.conf /etc/nginx/sites-available/ads-mcp
 sudo nginx -t && sudo systemctl reload nginx
 ENDSSH
+else
+    echo "==> Skipping nginx template overwrite (preserves certbot-managed HTTPS config)"
+fi
 
 echo ""
 echo "==> Verifying health endpoints"
 sleep 2
-BASE="http://52.21.17.69"
-for path in google-ads meta-ads analytics search-console content; do
+BASE="https://mcp.rctechbridge.com"
+for path in google-ads meta-ads analytics search-console content gbp orchestrator; do
     status=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/$path/health" 2>/dev/null || echo "ERR")
     echo "  $path/health -> $status"
 done

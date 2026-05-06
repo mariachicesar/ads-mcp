@@ -11,6 +11,59 @@ This spec assumes:
 - All writes follow `dry-run -> approval -> execute`.
 - `ads-mcp` is called only from `backend-rc` using signed server-to-server requests.
 
+## Implementation Checklist (backend-rc)
+
+Use this as the execution checklist to complete the backend side of Phase 1.
+
+### A. Data model and migrations
+
+- [ ] Create `marketing_connection` with unique `(tenant_id, business_key, platform)`.
+- [ ] Create `marketing_action_request` with request payload, dry-run response, status, and correlation `request_id`.
+- [ ] Create `marketing_action_approval` linked to action request and enforce one active approval per request.
+- [ ] Create `marketing_action_execution` linked to request + approval and store raw `ads_mcp_response_json`.
+- [ ] Create `marketing_snapshot` for read/dry-run snapshots with freshness metadata.
+- [ ] Create `marketing_content_request` for content draft lifecycle.
+- [ ] Add indexes for frequent filters: `(tenant_id, business_key, status)` and foreign key indexes.
+
+### B. State machine guards
+
+- [ ] Enforce allowed transitions in service layer for `marketing_action_request`.
+- [ ] Enforce allowed transitions in service layer for `marketing_action_approval`.
+- [ ] Block execute unless request status is `approved` and approval status is `approved`.
+- [ ] Block execute if approval expired.
+- [ ] Reject execute if `approval_id` does not belong to the same action request.
+
+### C. Security and request signing
+
+- [ ] Add outbound signer middleware/client for all backend -> ads-mcp requests.
+- [ ] Include `tenantId`, `businessKey`, `requestedBy`, `dryRun`, `payload` in every write request.
+- [ ] Include `approvalId` on execute calls.
+- [ ] Ensure backend never exposes ad-platform credentials to frontend.
+
+### D. Endpoints (minimum)
+
+- [ ] `POST /marketing/:platform/:businessKey/read/...` pass-through reads with tenant authorization.
+- [ ] `POST /marketing/:platform/:businessKey/actions/dry-run` create request in `draft`, call ads-mcp with `dryRun: true`, persist preview.
+- [ ] `POST /marketing/actions/:actionRequestId/approve` and reject endpoint with approver validation.
+- [ ] `POST /marketing/actions/:actionRequestId/execute` validate approval and call ads-mcp with `dryRun: false`.
+- [ ] `GET /marketing/actions/:actionRequestId` and list endpoints for history/status.
+
+### E. Idempotency and observability
+
+- [ ] Support `idempotency_key` for dry-run and execute endpoints.
+- [ ] Persist full request/response payloads for audit.
+- [ ] Add structured logs with `request_id`, `action_request_id`, `approval_id`, `tenant_id`.
+- [ ] Add retry-safe behavior for network/transient failures.
+
+### F. Phase 1 acceptance tests
+
+- [ ] Dry-run write request stores preview and creates pending approval.
+- [ ] Unapproved execute attempt fails with clear error.
+- [ ] Approved execute attempt updates status to `executed` on success.
+- [ ] Failed execute attempt updates status to `failed` and stores error payload.
+- [ ] Expired approval prevents execution.
+- [ ] Cross-tenant access is denied for reads, dry-run, and execute.
+
 ## Phase 1 Outcome
 
 Phase 1 is complete when `backend-rc` can:
