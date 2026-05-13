@@ -45,7 +45,22 @@ def get_secret(secret_id: str, settings: Settings) -> Any:
 
     boto3 = import_module("boto3")
     client = boto3.client("secretsmanager", region_name=settings.aws_region)
-    secret_value = client.get_secret_value(SecretId=secret_id)
+    try:
+        secret_value = client.get_secret_value(SecretId=secret_id)
+    except Exception as exc:
+        # boto3 ClientError carries a response dict with the AWS error code
+        aws_code = (getattr(exc, "response", None) or {}).get("Error", {}).get("Code", "")
+        if aws_code in ("ResourceNotFoundException", "SecretNotFoundException"):
+            # Secret simply doesn't exist — let the caller decide what to do
+            return None
+        # Access denied, network error, etc. — surface as a structured error
+        from shared.errors import AdsMcpError
+        raise AdsMcpError(
+            status_code=500,
+            error_code="INTERNAL_ERROR",
+            message="Failed to retrieve configuration from secrets store.",
+            details={"reason": str(exc)},
+        ) from exc
     parsed = _parse_secret_value(secret_value)
     _set_cached(secret_id, parsed, settings.secret_cache_ttl_seconds)
     return parsed

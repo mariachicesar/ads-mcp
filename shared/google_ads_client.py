@@ -865,3 +865,142 @@ def mutate_campaign_bidding_strategy(
         "targetCpaMicros": target_cpa_micros,
         "targetRoas": target_roas,
     }
+
+
+def get_ad_group_keywords_snapshot(
+    config: dict[str, Any],
+    *,
+    campaign_name: str,
+    ad_group_name: str,
+    tool: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return existing (non-removed) positive keywords for an ad group."""
+    client = build_google_ads_client(config, tool=tool)
+    customer_id = get_google_ads_customer_id(config, tool=tool)
+    google_ads_service = client.get_service("GoogleAdsService")
+
+    query = f"""
+        SELECT
+          ad_group_criterion.criterion_id,
+          ad_group_criterion.keyword.text,
+          ad_group_criterion.keyword.match_type,
+          ad_group_criterion.status,
+          ad_group_criterion.resource_name,
+          ad_group.name,
+          campaign.name
+        FROM ad_group_criterion
+        WHERE campaign.name = '{_escape_gaql_string(campaign_name)}'
+          AND ad_group.name = '{_escape_gaql_string(ad_group_name)}'
+          AND ad_group_criterion.type_ = 'KEYWORD'
+          AND ad_group_criterion.negative = false
+          AND ad_group_criterion.status != 'REMOVED'
+    """
+    try:
+        response = google_ads_service.search(customer_id=customer_id, query=query)
+    except Exception as exc:
+        raise AdsMcpError(
+            status_code=502,
+            error_code="UPSTREAM_ERROR",
+            message="Google Ads keyword lookup failed.",
+            tool=tool,
+            retryable=True,
+            details={"reason": str(exc)},
+        ) from exc
+
+    return [
+        {
+            "criterionId": str(row.ad_group_criterion.criterion_id),
+            "keywordText": row.ad_group_criterion.keyword.text,
+            "matchType": row.ad_group_criterion.keyword.match_type.name,
+            "status": row.ad_group_criterion.status.name,
+            "resourceName": row.ad_group_criterion.resource_name,
+        }
+        for row in response
+    ]
+
+
+def add_keyword_to_ad_group(
+    config: dict[str, Any],
+    *,
+    campaign_name: str,
+    ad_group_name: str,
+    keyword_text: str,
+    match_type: str,
+    max_cpc_bid_micros: int | None = None,
+    tool: str | None = None,
+) -> dict[str, Any]:
+    client = build_google_ads_client(config, tool=tool)
+    customer_id = get_google_ads_customer_id(config, tool=tool)
+    google_ads_service = client.get_service("GoogleAdsService")
+
+    # Look up the ad group resource name
+    q = f"""
+        SELECT ad_group.id, ad_group.resource_name, ad_group.name, campaign.name
+        FROM ad_group
+        WHERE campaign.name = '{_escape_gaql_string(campaign_name)}'
+          AND ad_group.name = '{_escape_gaql_string(ad_group_name)}'
+          AND ad_group.status != 'REMOVED'
+        LIMIT 1
+    """
+    try:
+        response = google_ads_service.search(customer_id=customer_id, query=q)
+        row = next(iter(response), None)
+    except Exception as exc:
+        raise AdsMcpError(
+            status_code=502,
+            error_code="UPSTREAM_ERROR",
+            message="Google Ads ad group lookup failed.",
+            tool=tool,
+            retryable=True,
+            details={"reason": str(exc)},
+        ) from exc
+
+    if row is None:
+        raise AdsMcpError(
+            status_code=404,
+            error_code="REQUEST_INVALID",
+            message=f"Ad group '{ad_group_name}' in campaign '{campaign_name}' was not found.",
+            tool=tool,
+            details={"adGroupName": ad_group_name, "campaignName": campaign_name},
+        )
+
+    ad_group_resource_name = row.ad_group.resource_name
+    ad_group_id = str(row.ad_group.id)
+
+    try:
+        ad_group_criterion_service = client.get_service("AdGroupCriterionService")
+        operation = client.get_type("AdGroupCriterionOperation")
+        criterion = operation.create
+        criterion.ad_group = ad_group_resource_name
+        criterion.status = client.enums.AdGroupCriterionStatusEnum.ENABLED
+        criterion.keyword.text = keyword_text
+        match_type_enum = client.enums.KeywordMatchTypeEnum
+        criterion.keyword.match_type = getattr(match_type_enum, match_type.upper())
+        if max_cpc_bid_micros is not None:
+            criterion.cpc_bid_micros = int(max_cpc_bid_micros)
+        response = ad_group_criterion_service.mutate_ad_group_criteria(
+            customer_id=customer_id,
+            operations=[operation],
+        )
+    except Exception as exc:
+        raise AdsMcpError(
+            status_code=502,
+            error_code="UPSTREAM_ERROR",
+            message="Google Ads keyword add failed.",
+            tool=tool,
+            retryable=False,
+            details={"reason": str(exc)},
+        ) from exc
+
+    result = response.results[0] if response.results else None
+    return {
+        "customerAccountId": customer_id,
+        "campaignName": campaign_name,
+        "adGroupName": ad_group_name,
+        "adGroupId": ad_group_id,
+        "keywordResourceName": getattr(result, "resource_name", None),
+        "keywordText": keyword_text,
+        "matchType": match_type.upper(),
+        "maxCpcBidMicros": max_cpc_bid_micros,
+        "maxCpcBid": max_cpc_bid_micros / 1_000_000 if max_cpc_bid_micros is not None else None,
+    }

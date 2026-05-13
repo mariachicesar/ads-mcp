@@ -53,6 +53,20 @@ async def handle_runtime_error(request: Request, exc: RuntimeError) -> JSONRespo
     )
 
 
+@app.exception_handler(Exception)
+async def handle_unhandled_error(request: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse(
+        status_code=500,
+        content={
+            "ok": False,
+            "service": "content",
+            "errorCode": "INTERNAL_ERROR",
+            "message": str(exc) or "An unexpected error occurred.",
+            "requestId": getattr(request.state, "request_id", None),
+        },
+    )
+
+
 @app.get("/health")
 def health() -> dict:
     return {"ok": True, "service": "content", "phase": "live"}

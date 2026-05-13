@@ -352,3 +352,165 @@ Recommended Phase 1 behavior:
 5. execute request
 6. execution persistence
 7. history retrieval for the UI
+
+---
+
+# Backend RC Phase 2 Spec
+
+## Goal
+
+Move from one validated end-to-end flow to a production-grade multi-platform backend integration with operational safety, policy controls, and observability.
+
+## Phase 2 Outcomes
+
+Phase 2 is complete when `backend-rc` can:
+
+1. run dry-run -> approval -> execute for Google Ads, Meta, GA4, Search Console, Content, and GBP
+2. enforce request signing and approval policies for every write operation
+3. provide reliable retry and idempotency behavior for transient failures
+4. expose complete action history and execution logs for tenant users and internal operators
+5. alert on failed executions and degraded MCP dependencies
+
+## Phase 2 Implementation Checklist
+
+### A. Platform coverage expansion
+
+- [ ] Add backend route mappings for Meta, GA4, Search Console, Content, and GBP tools.
+- [ ] Normalize cross-platform response envelopes to one frontend contract.
+- [ ] Persist platform-specific snapshots in `marketing_snapshot` with stable `snapshot_type` values.
+
+### B. Security hardening
+
+- [ ] Enforce signed outbound requests to `ads-mcp` for all read and write calls.
+- [ ] Reject execute endpoints unless linked approval is valid and unexpired.
+- [ ] Add role-based policy checks (requester, approver, executor).
+- [ ] Add replay protection for signed envelopes (nonce or timestamp validation strategy).
+
+### C. Reliability and idempotency
+
+- [ ] Implement idempotency-key semantics for both dry-run and execute endpoints.
+- [ ] Add retry policy with backoff and max-attempt limits for MCP network errors.
+- [ ] Create explicit terminal failure reasons (policy denied, expired approval, upstream timeout, MCP error).
+- [ ] Ensure retries create new `marketing_action_execution` rows without mutating prior attempts.
+
+### D. Observability and auditability
+
+- [ ] Emit structured logs with `tenant_id`, `action_request_id`, `approval_id`, `execution_id`, `request_id`.
+- [ ] Add metrics: dry-runs, approvals, executes, failures, latency, retries.
+- [ ] Add alerting thresholds for sustained failure rate and MCP unavailability.
+- [ ] Provide operator view/query path for failed executions and pending approvals.
+
+### E. Dashboard integration
+
+- [ ] Expose list/filter endpoints for pending approvals and historical actions.
+- [ ] Return normalized dry-run diff payloads ready for UI rendering.
+- [ ] Return execution progress states suitable for polling or event updates.
+
+## Phase 2 Acceptance Tests
+
+- [ ] Each supported platform completes dry-run -> approval -> execute in integration tests.
+- [ ] Expired approval blocks execute with deterministic error code.
+- [ ] Duplicate execute with same idempotency key does not create duplicate side effects.
+- [ ] Failed upstream dependency triggers retry policy and observable failure logs.
+- [ ] Tenant isolation is enforced across all platforms and endpoints.
+
+---
+
+# Backend RC Phase 3 Spec
+
+## Goal
+
+Enable durable cross-agent orchestration where backend-managed workflows coordinate multiple MCP services with step-level tracking, rollback policy, and governance.
+
+## Phase 3 Outcomes
+
+Phase 3 is complete when `backend-rc` can:
+
+1. persist and execute multi-step orchestration plans from the orchestrator service
+2. track per-step status, retries, and outputs across heterogeneous MCP services
+3. enforce approval and policy gates at both workflow and step levels
+4. recover safely from partial failures using defined retry/compensation rules
+5. provide complete workflow history and analytics to dashboard users
+
+## Phase 3 Durable Additions
+
+Add orchestration-specific durable entities (or equivalent models):
+
+- `marketing_workflow_run`
+- `marketing_workflow_step`
+- `marketing_workflow_event`
+
+Minimum fields:
+
+### marketing_workflow_run
+
+- `id`
+- `tenant_id`
+- `business_key`
+- `workflow_type`
+- `status` — `planned`, `approved`, `running`, `completed`, `failed`, `cancelled`
+- `objective_json`
+- `approval_id` nullable
+- `started_at` nullable
+- `completed_at` nullable
+- `created_at`
+
+### marketing_workflow_step
+
+- `id`
+- `workflow_run_id`
+- `step_order`
+- `service` — `google-ads`, `meta-ads`, `analytics`, `search-console`, `content`, `gbp`
+- `tool_name`
+- `status` — `planned`, `queued`, `running`, `succeeded`, `failed`, `skipped`, `compensated`
+- `request_payload_json`
+- `response_payload_json` nullable
+- `retry_count`
+- `error_code` nullable
+- `error_message` nullable
+- `started_at` nullable
+- `completed_at` nullable
+
+### marketing_workflow_event
+
+- `id`
+- `workflow_run_id`
+- `workflow_step_id` nullable
+- `event_type`
+- `event_payload_json`
+- `created_at`
+
+## Phase 3 Orchestration Checklist
+
+### A. Planning and approval
+
+- [ ] Persist orchestrator plan output as a workflow run with ordered steps.
+- [ ] Require explicit approval for workflow execution when any step is write-capable.
+- [ ] Support policy-based step suppression (forbidden tools/platforms by role or tenant policy).
+
+### B. Execution engine
+
+- [ ] Build backend worker/runner for step-by-step execution.
+- [ ] Enforce step dependencies and halt/continue strategy configuration.
+- [ ] Capture per-step request/response and correlation IDs.
+- [ ] Support resumable workflow runs after transient interruption.
+
+### C. Failure handling
+
+- [ ] Implement per-step retry strategy with bounded attempts.
+- [ ] Define compensation policy per workflow type.
+- [ ] Mark unrecoverable failures with actionable error codes and operator guidance.
+
+### D. Governance and visibility
+
+- [ ] Add role-based authorization for creating, approving, cancelling, and retrying workflow runs.
+- [ ] Expose workflow run timeline endpoints for dashboard UI.
+- [ ] Add metrics for workflow duration, step failure hotspots, and retry rates.
+
+## Phase 3 Acceptance Tests
+
+- [ ] A multi-step workflow across at least three services reaches `completed` with full step logs.
+- [ ] Mid-workflow step failure triggers retry and then terminal failure when retry budget is exhausted.
+- [ ] Cancellation during execution leaves workflow in consistent terminal state.
+- [ ] Compensation path executes for workflow types that define rollback behavior.
+- [ ] Tenant and role policies are enforced across workflow create/approve/execute operations.

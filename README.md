@@ -191,9 +191,10 @@ Secrets are written to `/ads-mcp/{business-key}/{platform}/config` for each busi
 > **No local AWS credentials?** The EC2 instance has the `rd-mcp-ec2-role` IAM role attached, so you can run the push from the instance instead:
 > ```powershell
 > # PowerShell or Git Bash — scp/ssh work in both on Windows
-> scp -i ~/.ssh/rd-mcp-key.pem local-dev-config.json ubuntu@52.21.17.69:/opt/ads-mcp/local-dev-config.json
-> ssh -i ~/.ssh/rd-mcp-key.pem ubuntu@52.21.17.69 "cd /opt/ads-mcp && .venv/bin/python scripts/push-secrets.py"
-> ssh -i ~/.ssh/rd-mcp-key.pem ubuntu@52.21.17.69 "rm /opt/ads-mcp/local-dev-config.json"
+> # EC2_PUBLIC_IP is set in your .env file
+> scp -i ~/.ssh/rd-mcp-key.pem local-dev-config.json ubuntu@$EC2_PUBLIC_IP:/opt/ads-mcp/local-dev-config.json
+> ssh -i ~/.ssh/rd-mcp-key.pem ubuntu@$EC2_PUBLIC_IP "cd /opt/ads-mcp && .venv/bin/python scripts/push-secrets.py"
+> ssh -i ~/.ssh/rd-mcp-key.pem ubuntu@$EC2_PUBLIC_IP "rm /opt/ads-mcp/local-dev-config.json"
 > ```
 
 ### 3. Deploy latest code
@@ -203,7 +204,15 @@ Secrets are written to `/ads-mcp/{business-key}/{platform}/config` for each busi
 bash scripts/deploy.sh
 ```
 
-This rsync's the repo to `/opt/ads-mcp` on the instance and restarts all systemd services.
+This streams a tar archive of the repo to `/opt/ads-mcp` on the instance, installs dependencies, updates systemd unit files, restarts all services, and verifies HTTPS health endpoints.
+
+By default, deploy does **not** overwrite the live nginx site file so certbot-managed HTTPS config is preserved.
+
+Use this only when you intentionally want to apply the repo nginx template:
+
+```bash
+UPDATE_NGINX=true bash scripts/deploy.sh
+```
 
 ### 4. Enable HTTPS (first time only)
 
@@ -309,6 +318,56 @@ curl -X POST "https://mcp.rctechbridge.com/google-ads/tools/update_campaign_budg
     }
   }'
 ```
+
+### HMAC Request Signing
+
+All production requests from `backend-rc` to these servers are signed with HMAC-SHA256. Each server verifies the signature before processing the request.
+
+**On the ads-mcp EC2 (`/opt/ads-mcp/.env`):**
+
+```env
+ADS_MCP_REQUIRE_SIGNED_REQUESTS=true
+ADS_MCP_SIGNING_KEYS_JSON={"backend-rc":"<32-byte hex secret>"}
+```
+
+Generate a new secret:
+```bash
+openssl rand -hex 32
+```
+
+**On the backend EC2 (`backend-rc/.env`):**
+
+```env
+ADS_MCP_KEY_ID=backend-rc
+ADS_MCP_SIGNING_SECRET=<same 32-byte hex secret>
+```
+
+The key ID (`backend-rc`) must appear as a key in `ADS_MCP_SIGNING_KEYS_JSON`. Multiple callers can each have their own entry.
+
+> **systemd warning:** Do NOT put `ADS_MCP_SIGNING_KEYS_JSON` in a systemd `Environment=` directive — systemd strips curly braces from inline values. Always use `EnvironmentFile=/opt/ads-mcp/.env` in all unit files and keep the JSON value there.
+
+After updating `/opt/ads-mcp/.env`, reload and restart all services:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart google-ads-mcp meta-ads-mcp analytics-mcp search-console-mcp content-agent-mcp gbp-mcp orchestrator-mcp
+```
+
+---
+
+### AWS Security Group
+
+The ads-mcp EC2 must allow inbound TCP on ports 8001–8007 from the backend EC2's VPC subnet so `backend-rc` can reach the services over the private network.
+
+Required inbound rule on the ads-mcp security group:
+
+| Type | Protocol | Port range | Source |
+| ---- | -------- | ---------- | ------ |
+| Custom TCP | TCP | 8001–8007 | `172.31.0.0/16` (VPC subnet CIDR) |
+
+Without this rule, all requests from backend-rc will time out regardless of signing config.
+
+---
 
 ### Scheduled GBP posts (cron)
 

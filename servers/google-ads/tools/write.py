@@ -13,6 +13,8 @@ from shared.google_ads_client import (
     add_negative_keyword_to_campaign,
     create_responsive_search_ad,
     mutate_campaign_bidding_strategy,
+    get_ad_group_keywords_snapshot,
+    add_keyword_to_ad_group,
 )
 from shared.responses import build_change, build_success_response
 from shared.rules import evaluate_google_ads_mutation_rules
@@ -1000,6 +1002,198 @@ def update_campaign_bidding_strategy(request, request_id: str | None) -> dict:
         business_key=request.businessKey,
         request_id=request_id,
         summary=f"Updated campaign '{campaign_name}' bidding strategy to {bidding_strategy}.",
+        rule_checks=rule_checks,
+        changes=changes,
+        data=mutation_result,
+        requires_confirmation=False,
+        executed=True,
+    )
+
+
+def add_keyword(request, request_id: str | None) -> dict:
+    config = load_google_ads_sdk_config(
+        business_key=request.businessKey,
+        tool="add_keyword",
+    )
+    payload = request.payload or {}
+
+    campaign_name = payload.get("campaignName")
+    ad_group_name = payload.get("adGroupName")
+    keyword_text = payload.get("keywordText")
+    match_type = (payload.get("matchType") or "BROAD").upper()
+    max_cpc_bid = payload.get("maxCpcBid")
+
+    if not campaign_name:
+        raise AdsMcpError(
+            status_code=400,
+            error_code="REQUEST_INVALID",
+            message="campaignName is required.",
+            tool="add_keyword",
+        )
+    if not ad_group_name:
+        raise AdsMcpError(
+            status_code=400,
+            error_code="REQUEST_INVALID",
+            message="adGroupName is required.",
+            tool="add_keyword",
+        )
+    if not keyword_text:
+        raise AdsMcpError(
+            status_code=400,
+            error_code="REQUEST_INVALID",
+            message="keywordText is required.",
+            tool="add_keyword",
+        )
+    if match_type not in _VALID_MATCH_TYPES:
+        raise AdsMcpError(
+            status_code=400,
+            error_code="REQUEST_INVALID",
+            message=f"matchType must be one of: {', '.join(sorted(_VALID_MATCH_TYPES))}.",
+            tool="add_keyword",
+        )
+
+    max_cpc_bid_micros: int | None = None
+    if max_cpc_bid is not None:
+        try:
+            max_cpc_bid_float = float(max_cpc_bid)
+        except (TypeError, ValueError) as exc:
+            raise AdsMcpError(
+                status_code=400,
+                error_code="REQUEST_INVALID",
+                message="maxCpcBid must be a numeric value.",
+                tool="add_keyword",
+            ) from exc
+        if max_cpc_bid_float <= 0:
+            raise AdsMcpError(
+                status_code=400,
+                error_code="REQUEST_INVALID",
+                message="maxCpcBid must be greater than zero.",
+                tool="add_keyword",
+            )
+        max_cpc_bid_micros = round(max_cpc_bid_float * 1_000_000)
+
+    # Duplicate check — fetch existing positive keywords for this ad group
+    duplicate_info = None
+    try:
+        existing = get_ad_group_keywords_snapshot(
+            config,
+            campaign_name=campaign_name,
+            ad_group_name=ad_group_name,
+            tool="add_keyword",
+        )
+        for existing_kw in existing:
+            if (
+                existing_kw["keywordText"].lower() == keyword_text.lower()
+                and existing_kw["matchType"] == match_type
+            ):
+                duplicate_info = existing_kw
+                break
+    except AdsMcpError:
+        raise
+    except Exception:
+        # Non-fatal — if duplicate check fails, proceed anyway
+        pass
+
+    if duplicate_info:
+        raise AdsMcpError(
+            status_code=409,
+            error_code="DUPLICATE",
+            message=(
+                f"Keyword '{keyword_text}' [{match_type}] already exists "
+                f"in ad group '{ad_group_name}' (criterion_id: {duplicate_info['criterionId']})."
+            ),
+            tool="add_keyword",
+            retryable=False,
+            details={"existing": duplicate_info},
+        )
+
+    rule_checks = evaluate_google_ads_mutation_rules(
+        business_key=request.businessKey,
+        payload=payload,
+        campaign_name=campaign_name,
+        ad_group_name=ad_group_name,
+        change_type="keywords",
+    )
+
+    after_value: dict = {"keywordText": keyword_text, "matchType": match_type}
+    if max_cpc_bid_micros is not None:
+        after_value["maxCpcBid"] = max_cpc_bid_micros / 1_000_000
+
+    changes = [
+        build_change(
+            field="adGroupKeyword",
+            before=None,
+            after=after_value,
+            resource_type="ad_group_criterion",
+            resource_id=ad_group_name,
+        )
+    ]
+
+    if request.dryRun is not False:
+        return build_success_response(
+            service=SERVICE_NAME,
+            tool="add_keyword",
+            mode="dry_run",
+            business_key=request.businessKey,
+            request_id=request_id,
+            summary=(
+                f"Would add keyword '{keyword_text}' [{match_type}] "
+                f"to ad group '{ad_group_name}' in campaign '{campaign_name}'."
+            ),
+            rule_checks=rule_checks,
+            changes=changes,
+            data={
+                "campaignName": campaign_name,
+                "adGroupName": ad_group_name,
+                "keywordText": keyword_text,
+                "matchType": match_type,
+                "maxCpcBid": max_cpc_bid_micros / 1_000_000 if max_cpc_bid_micros is not None else None,
+            },
+            requires_confirmation=True,
+            executed=False,
+        )
+
+    if not request.approvalId:
+        raise AdsMcpError(
+            status_code=400,
+            error_code="BUSINESS_RULE_BLOCKED",
+            message="approvalId is required for execute requests.",
+            retryable=False,
+            rule_checks=rule_checks,
+            tool="add_keyword",
+        )
+
+    if any(not check["passed"] for check in rule_checks):
+        raise AdsMcpError(
+            status_code=400,
+            error_code="BUSINESS_RULE_BLOCKED",
+            message="Execution blocked by business rules.",
+            retryable=False,
+            rule_checks=rule_checks,
+            tool="add_keyword",
+        )
+
+    mutation_result = add_keyword_to_ad_group(
+        config,
+        campaign_name=campaign_name,
+        ad_group_name=ad_group_name,
+        keyword_text=keyword_text,
+        match_type=match_type,
+        max_cpc_bid_micros=max_cpc_bid_micros,
+        tool="add_keyword",
+    )
+
+    changes[0]["status"] = "applied"
+    return build_success_response(
+        service=SERVICE_NAME,
+        tool="add_keyword",
+        mode="execute",
+        business_key=request.businessKey,
+        request_id=request_id,
+        summary=(
+            f"Added keyword '{keyword_text}' [{match_type}] "
+            f"to ad group '{ad_group_name}' in campaign '{campaign_name}'."
+        ),
         rule_checks=rule_checks,
         changes=changes,
         data=mutation_result,

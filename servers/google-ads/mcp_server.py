@@ -53,6 +53,7 @@ from tools.write import (
     update_ad_status,
     create_rsa,
     update_campaign_bidding_strategy,
+    add_keyword,
 )
 from tools.knowledge import query_ads_knowledge
 
@@ -469,6 +470,40 @@ def google_ads_update_campaign_bidding_strategy(
         "google_ads_update_campaign_bidding_strategy",
         lambda: update_campaign_bidding_strategy(req, request_id=None),
     )
+
+
+@mcp.tool()
+def google_ads_add_keyword(
+    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    campaign_name: Annotated[str, Field(description="Exact campaign name as it appears in Google Ads")],
+    ad_group_name: Annotated[str, Field(description="Exact ad group name to add the keyword to")],
+    keyword_text: Annotated[str, Field(description="Keyword text to add, e.g. 'electrician near me'")],
+    match_type: Annotated[str, Field(description="Match type: 'BROAD', 'PHRASE', or 'EXACT'")] = "BROAD",
+    max_cpc_bid: Annotated[float | None, Field(description="Optional max CPC bid in USD. Leave unset to inherit the ad group default bid.")] = None,
+    dry_run: Annotated[bool, Field(description="If true, shows proposed changes without applying them. Always use true first.")] = True,
+    approval_id: Annotated[str | None, Field(description="Required for execute mode (dry_run=false). Copy from the dry-run response.")] = None,
+) -> dict:
+    """Add a positive keyword to an ad group.
+
+    IMPORTANT: Always call with dry_run=true first. Show the user the proposed
+    keyword and only call with dry_run=false after they explicitly approve.
+    Note: RnR Electrician keyword changes require explicit approval per standing rules.
+    """
+    payload: dict = {
+        "campaignName": campaign_name,
+        "adGroupName": ad_group_name,
+        "keywordText": keyword_text,
+        "matchType": match_type,
+    }
+    if max_cpc_bid is not None:
+        payload["maxCpcBid"] = max_cpc_bid
+    req = ToolRequest(
+        businessKey=business_key,
+        dryRun=dry_run,
+        approvalId=approval_id,
+        payload=payload,
+    )
+    return _run_tool("google_ads_add_keyword", lambda: add_keyword(req, request_id=None))
 
 
 @mcp.tool()

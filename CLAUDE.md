@@ -86,18 +86,30 @@ Infrastructure requirements:
 
 ## Build Order
 
-1. Project brief
-2. Google OAuth setup
-3. AWS EC2 launch and IAM role
-4. EC2 bootstrap
-5. Domain and DNS
-6. Google Ads MCP server
-7. Client integration test
-8. Meta Ads MCP server
-9. GA4 MCP server
-10. Search Console MCP server
-11. Content Agent
-12. Cross-agent orchestration
+1. Project brief ✅
+2. Google OAuth setup ✅
+3. AWS EC2 launch and IAM role ✅
+4. EC2 bootstrap ✅
+5. Domain and DNS ✅
+6. Google Ads MCP server ✅
+7. Client integration test ✅
+8. Meta Ads MCP server ✅
+9. GA4 MCP server ✅
+10. Search Console MCP server ✅
+11. Content Agent ✅
+12. Cross-agent orchestration ✅
+    - Phase 1: single-action dry-run → approval → execute (see docs/BACKEND_RC_PHASE1_SPEC.md)
+    - Phase 3: durable multi-step workflow runs (see docs/WORKFLOW_RUNS.md)
+
+---
+
+## Docs
+
+| File | Description |
+|------|-------------|
+| `docs/INTEGRATION_CONTRACT.md` | HMAC signing scheme, dry-run contract, approval flow |
+| `docs/BACKEND_RC_PHASE1_SPEC.md` | Phase 1 single-action request/approval DB spec |
+| `docs/WORKFLOW_RUNS.md` | Phase 3 multi-step workflow run architecture |
 
 ---
 
