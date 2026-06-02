@@ -14,6 +14,9 @@ class AdsMcpError(Exception):
     rule_checks: list[dict[str, Any]] = field(default_factory=list)
     tool: str | None = None
 
+    def __str__(self) -> str:
+        return self.message
+
     def to_response(self, *, service: str, request_id: str | None) -> dict[str, Any]:
         response = {
             "ok": False,
