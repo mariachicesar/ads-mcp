@@ -400,11 +400,11 @@ def create_post(
         "topicType": topic_type,
     }
 
-    if call_to_action_type and call_to_action_url:
-        body["callToAction"] = {
-            "actionType": call_to_action_type,
-            "url": call_to_action_url,
-        }
+    if call_to_action_type:
+        cta: dict[str, Any] = {"actionType": call_to_action_type}
+        if call_to_action_type != "CALL" and call_to_action_url:
+            cta["url"] = call_to_action_url
+        body["callToAction"] = cta
 
     if topic_type == "EVENT" and event_title:
         body["event"] = {
