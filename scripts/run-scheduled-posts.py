@@ -13,6 +13,11 @@ import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
+
+# Naive scheduled times in the queue are interpreted as this timezone.
+# Both businesses operate in Pacific time; EC2 itself runs in UTC.
+DEFAULT_SCHEDULE_TZ = ZoneInfo("America/Los_Angeles")
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -81,9 +86,11 @@ def main() -> int:
     for entry in queue:
         try:
             scheduled = datetime.fromisoformat(entry["scheduledTime"])
-            # Treat naive datetimes as local time → UTC
+            # Treat naive datetimes as Pacific time, then convert to UTC for comparison.
+            # Without this, EC2 (UTC) would interpret "09:00" as 09:00 UTC = 02:00 PT.
             if scheduled.tzinfo is None:
-                scheduled = scheduled.astimezone(timezone.utc)
+                scheduled = scheduled.replace(tzinfo=DEFAULT_SCHEDULE_TZ)
+            scheduled = scheduled.astimezone(timezone.utc)
         except (KeyError, ValueError) as exc:
             log.warning("Skipping malformed entry id=%s: %s", entry.get("id"), exc)
             remaining.append(entry)

@@ -22,3 +22,6 @@ Thumbs.db
 *.stackdump
 secrets.local.json
 local-dev-config.json
+
+# Runtime-mutable state owned by EC2; do not sync between machines.
+servers/gbp/scheduled_posts.json

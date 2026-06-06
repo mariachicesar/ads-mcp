@@ -25,6 +25,7 @@ tar -czf - \
     --exclude='./.git' \
     --exclude='./local-dev-config.json' \
     --exclude='./.env' \
+    --exclude='./servers/gbp/scheduled_posts.json' \
     . | $SSH "$REMOTE_HOST" "mkdir -p $REMOTE_DIR && tar -xzf - -C $REMOTE_DIR"
 
 echo "==> Installing/updating Python dependencies"
