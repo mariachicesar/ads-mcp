@@ -26,7 +26,7 @@ git fetch -q origin main
 import json, subprocess, sys
 
 result = subprocess.run(
-    ["git", "show", "FETCH_HEAD:servers/gbp/scheduled_posts.json"],
+    ["git", "show", "origin/main:servers/gbp/scheduled_posts.json"],
     capture_output=True, text=True
 )
 if result.returncode != 0:
@@ -51,7 +51,7 @@ if new_entries:
 EOF
 
 # --- 3. Checkout non-queue files from origin (code updates) ---
-git checkout -q FETCH_HEAD -- \
+git checkout -q origin/main -- \
     .gitignore \
     scripts/deploy.sh \
     scripts/run-scheduled-posts.py \
