@@ -19,7 +19,7 @@ export AWS_REGION="${AWS_REGION:-us-east-1}"
 cd "$REPO"
 
 # --- 1. Fetch latest from origin (no merge yet) ---
-git fetch -q origin main
+git fetch -q origin
 
 # --- 2. Merge new queue entries from origin into local queue ---
 "$PYTHON" - <<'EOF'
