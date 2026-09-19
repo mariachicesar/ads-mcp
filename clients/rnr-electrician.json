@@ -1,0 +1,13 @@
+{
+  "businessKey": "rnr-electrician",
+  "displayName": "RnR Electrician",
+  "industry": "Electrician / home services",
+  "status": "active",
+  "platforms": {
+    "google-ads":     { "enabled": true,  "customer_account_id": "1057140994", "manager_account_id": "4746289774" },
+    "analytics":      { "enabled": false },
+    "search-console": { "enabled": true,  "site_url": "https://www.rnrelectrician.com" },
+    "gbp":            { "enabled": false },
+    "meta-ads":       { "enabled": false }
+  }
+}

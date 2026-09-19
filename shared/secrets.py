@@ -66,6 +66,61 @@ def get_secret(secret_id: str, settings: Settings) -> Any:
     return parsed
 
 
+def _invalidate_cache(secret_id: str) -> None:
+    _SECRET_CACHE.pop(secret_id, None)
+
+
+def put_secret(secret_id: str, value: Any, settings: Settings) -> None:
+    """Create or update a Secrets Manager secret. dict/list are JSON-encoded."""
+    if isinstance(value, (dict, list)):
+        secret_string = json.dumps(value)
+    else:
+        secret_string = str(value)
+
+    boto3 = import_module("boto3")
+    client = boto3.client("secretsmanager", region_name=settings.aws_region)
+    try:
+        client.create_secret(Name=secret_id, SecretString=secret_string)
+    except Exception as exc:  # noqa: BLE001
+        aws_code = (getattr(exc, "response", None) or {}).get("Error", {}).get("Code", "")
+        if aws_code in ("ResourceExistsException",):
+            client.put_secret_value(SecretId=secret_id, SecretString=secret_string)
+        else:
+            from shared.errors import AdsMcpError
+
+            raise AdsMcpError(
+                status_code=500,
+                error_code="INTERNAL_ERROR",
+                message="Failed to write configuration to secrets store.",
+                details={"reason": str(exc)},
+            ) from exc
+    _invalidate_cache(secret_id)
+
+
+def delete_secret(secret_id: str, settings: Settings) -> None:
+    """Delete a secret. No error if it does not exist."""
+    boto3 = import_module("boto3")
+    client = boto3.client("secretsmanager", region_name=settings.aws_region)
+    try:
+        client.delete_secret(
+            SecretId=secret_id, ForceDeleteWithoutRecovery=True
+        )
+    except Exception as exc:  # noqa: BLE001
+        aws_code = (getattr(exc, "response", None) or {}).get("Error", {}).get("Code", "")
+        if aws_code in ("ResourceNotFoundException", "SecretNotFoundException"):
+            pass
+        else:
+            from shared.errors import AdsMcpError
+
+            raise AdsMcpError(
+                status_code=500,
+                error_code="INTERNAL_ERROR",
+                message="Failed to delete configuration from secrets store.",
+                details={"reason": str(exc)},
+            ) from exc
+    _invalidate_cache(secret_id)
+
+
 def get_signing_secret(key_id: str, settings: Settings) -> str | None:
     if settings.auth_signing_keys_json:
         keys = json.loads(settings.auth_signing_keys_json)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from shared import manifest as manifest_mod
 from shared.config import get_settings
 from shared.errors import AdsMcpError
 from shared.secrets import get_platform_config
@@ -51,6 +52,43 @@ def load_platform_runtime_config(
     if config is None:
         config = get_platform_config(platform, business_key, settings)
 
+    client_manifest = manifest_mod.load_client_manifest(business_key)
+
+    if client_manifest is not None:
+        platform_cfg = client_manifest.platforms.get(platform)
+        if platform_cfg is None or not platform_cfg.enabled:
+            raise AdsMcpError(
+                status_code=404,
+                error_code="PLATFORM_NOT_CONFIGURED",
+                message=(
+                    f"{client_manifest.displayName} is not set up for {platform}. "
+                    f"Onboard it with scripts/onboard-client.py or the admin dashboard."
+                ),
+                tool=tool,
+                details={"businessKey": business_key, "platform": platform},
+            )
+
+        merged = manifest_mod.merge_platform_config(
+            client_manifest, platform, config if isinstance(config, dict) else None
+        ) or {}
+        missing_keys = [key for key in required_keys if not merged.get(key)]
+        if missing_keys:
+            raise AdsMcpError(
+                status_code=409,
+                error_code="PLATFORM_CONFIG_INCOMPLETE",
+                message=(
+                    f"{platform} configuration for '{business_key}' is incomplete."
+                ),
+                tool=tool,
+                details={
+                    "businessKey": business_key,
+                    "platform": platform,
+                    "missingKeys": missing_keys,
+                },
+            )
+        return merged
+
+    # ── No manifest: pre-existing behavior, unchanged ───────────────────────
     if config is None:
         raise AdsMcpError(
             status_code=400,

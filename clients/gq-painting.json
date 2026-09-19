@@ -1,0 +1,13 @@
+{
+  "businessKey": "gq-painting",
+  "displayName": "GQ Custom Painting",
+  "industry": "Painting contractor",
+  "status": "active",
+  "platforms": {
+    "google-ads":     { "enabled": true,  "customer_account_id": "7586427009", "manager_account_id": "4746289774" },
+    "analytics":      { "enabled": false },
+    "search-console": { "enabled": true,  "site_url": "https://www.gilqpaiting.com/" },
+    "gbp":            { "enabled": false },
+    "meta-ads":       { "enabled": false }
+  }
+}

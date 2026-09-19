@@ -1,3 +1,11 @@
+"""Structured error type for ads-mcp services.
+
+Known error codes include: REQUEST_INVALID, AUTH_INVALID, AUTH_EXPIRED,
+INTERNAL_ERROR, PLATFORM_NOT_CONFIGURED (404 — client has no manifest entry
+for the platform, or it is disabled), PLATFORM_CONFIG_INCOMPLETE (409 —
+platform enabled but credential secret is missing required keys).
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
