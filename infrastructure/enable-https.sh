@@ -12,8 +12,8 @@
 
 set -euo pipefail
 
-DOMAIN=${DOMAIN:-mcp.rctechbridge.com}
-EMAIL=${EMAIL:-admin@rctechbridge.com}
+DOMAIN=${DOMAIN:-mcp.rdtechbridge.com}
+EMAIL=${EMAIL:-admin@rdtechbridge.com}
 
 echo "==> Verifying DNS resolves to this server"
 SERVER_IP=$(curl -s http://checkip.amazonaws.com)

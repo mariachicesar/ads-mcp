@@ -72,7 +72,7 @@ fi
 echo ""
 echo "==> Verifying health endpoints"
 sleep 2
-BASE="https://mcp.rctechbridge.com"
+BASE="https://mcp.rdtechbridge.com"
 for path in google-ads meta-ads analytics search-console content gbp orchestrator; do
     status=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/$path/health" 2>/dev/null || echo "ERR")
     echo "  $path/health -> $status"

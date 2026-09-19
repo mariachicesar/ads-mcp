@@ -255,7 +255,7 @@ Use this when a developer's MCP client supports URL-based remote servers.
 {
   "mcpServers": {
     "ads-mcp-remote": {
-      "url": "https://mcp.rctechbridge.com/orchestrator/",
+      "url": "https://mcp.rdtechbridge.com/orchestrator/",
       "headers": {
         "X-Environment": "production"
       }
@@ -269,17 +269,17 @@ Use this when a developer's MCP client supports URL-based remote servers.
 3. Validate connectivity with health checks:
 
 ```bash
-curl -sS https://mcp.rctechbridge.com/health
-curl -sS https://mcp.rctechbridge.com/orchestrator/health
+curl -sS https://mcp.rdtechbridge.com/health
+curl -sS https://mcp.rdtechbridge.com/orchestrator/health
 ```
 
 4. Run dry-run tools first, then route execute/write operations through backend-rc for approvals and signatures.
 
-If a client does not support URL-based MCP servers yet, use local stdio server config (`command` + `args`) and keep backend traffic pointed at `https://mcp.rctechbridge.com`.
+If a client does not support URL-based MCP servers yet, use local stdio server config (`command` + `args`) and keep backend traffic pointed at `https://mcp.rdtechbridge.com`.
 
 ```bash
 # backend-rc environment
-ADS_MCP_BASE_URL=https://mcp.rctechbridge.com
+ADS_MCP_BASE_URL=https://mcp.rdtechbridge.com
 ADS_MCP_TIMEOUT_SECONDS=30
 ```
 
@@ -304,7 +304,7 @@ ADS_MCP_TIMEOUT_SECONDS=30
 
 ```bash
 # backend-rc -> ads-mcp dry-run example
-curl -X POST "https://mcp.rctechbridge.com/google-ads/tools/update_campaign_budget" \
+curl -X POST "https://mcp.rdtechbridge.com/google-ads/tools/update_campaign_budget" \
   -H "Content-Type: application/json" \
   -H "X-AdsMcp-Signature: <backend-generated-signature>" \
   -d '{

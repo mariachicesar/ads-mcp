@@ -55,7 +55,7 @@ def orchestrator_plan_cross_agent_workflow(
     business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
     objective: Annotated[str, Field(description="High-level orchestration objective")] = "Cross-agent optimization workflow",
     services: Annotated[list[str] | None, Field(description="Optional subset of services to include")]=None,
-    mcp_base_url: Annotated[str, Field(description="Base URL for routed service endpoints")] = "https://mcp.rctechbridge.com",
+    mcp_base_url: Annotated[str, Field(description="Base URL for routed service endpoints")] = "https://mcp.rdtechbridge.com",
 ) -> dict:
     """Generate a dry-run cross-agent workflow plan with ordered service steps."""
     request = ToolRequest(

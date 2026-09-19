@@ -21,7 +21,7 @@ def _resolve_base_url(request: ToolRequest) -> str:
     base_url = (
         request.requestMeta.get("mcpBaseUrl")
         or request.ruleContext.get("mcpBaseUrl")
-        or "https://mcp.rctechbridge.com"
+        or "https://mcp.rdtechbridge.com"
     )
     return str(base_url).rstrip("/")
 
