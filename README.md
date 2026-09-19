@@ -374,8 +374,8 @@ Without this rule, all requests from backend-rc will time out regardless of sign
 Posts queued via `gbp_create_post` with a `scheduled_time` live in `servers/gbp/scheduled_posts.json`. Add this cron on the EC2 instance to publish them:
 
 ```bash
-# Run once daily at 8am server time
-0 8 * * * /opt/ads-mcp/.venv/bin/python /opt/ads-mcp/scripts/run-scheduled-posts.py >> /var/log/ads-mcp/scheduled-posts.log 2>&1
+# Run every 15 minutes so posts fire close to their scheduled time
+*/15 * * * * /opt/ads-mcp/.venv/bin/python /opt/ads-mcp/scripts/run-scheduled-posts.py >> /var/log/ads-mcp/scheduled-posts.log 2>&1
 ```
 
 ---

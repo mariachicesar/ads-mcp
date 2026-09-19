@@ -1,0 +1,27 @@
+{
+  // Google Ads customer/account IDs are numeric and usually come from the Google Ads UI.
+  // customer_account_id = the specific client/customer account being managed.
+  // manager_account_id = the MCC/manager account that can access that customer account.
+  // In this repo these values are loaded from the Google Ads account configuration and
+  // used by shared/google_ads_client.py as login_customer_id and customer lookup keys.
+  "rnr-electrician": {
+    "customer_account_id": "1057140994", // RnR Electrician's Google Ads customer account
+    "manager_account_id": "4746289774", // Shared Google Ads manager/MCC account for both businesses
+    "developer_token": "...",
+    "client_id": "...",
+    "client_secret": "...",
+    "refresh_token": "...",
+    "ga4_property_id": "...",
+    "site_url": "https://www.rnrelectrician.com"
+  },
+  "gq-painting": {
+    "customer_account_id": "7586427009", // GQ Painting's Google Ads customer account
+    "manager_account_id": "4746289774", // Same shared Google Ads manager/MCC account
+    "developer_token": "...",
+    "client_id": "...",
+    "client_secret": "...",
+    "refresh_token": "...",
+    "ga4_property_id": "...",
+    "site_url": "https://www.gilqpaiting.com/"
+  }
+}
