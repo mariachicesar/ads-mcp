@@ -317,7 +317,7 @@ def google_ads_get_conversion_actions(
 @mcp.tool()
 def google_ads_get_change_history(
     business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
-    date_range: Annotated[str, Field(description="Date range, e.g. 'LAST_7_DAYS', 'LAST_14_DAYS', 'LAST_30_DAYS'")] = "LAST_14_DAYS",
+    date_range: Annotated[str, Field(description="Date range: 'LAST_7_DAYS', 'LAST_14_DAYS', or 'THIS_MONTH' (Google limits change history to the last 30 days)")] = "LAST_14_DAYS",
 ) -> dict:
     """Get the change history log — who changed what, when. Useful for auditing recent modifications to campaigns."""
     req = ToolRequest(businessKey=business_key, payload={"dateRange": date_range})

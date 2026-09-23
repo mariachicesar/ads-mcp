@@ -1130,10 +1130,12 @@ def get_conversion_actions(request: ToolRequest, request_id: str | None) -> dict
           conversion_action.id,
           conversion_action.name,
           conversion_action.status,
-          conversion_action.type_,
+          conversion_action.type,
           conversion_action.category,
           conversion_action.counting_type,
           conversion_action.include_in_conversions_metric,
+          conversion_action.primary_for_goal,
+          conversion_action.phone_call_duration_seconds,
           conversion_action.value_settings.default_value
         FROM conversion_action
         WHERE conversion_action.status != 'REMOVED'
@@ -1152,6 +1154,8 @@ def get_conversion_actions(request: ToolRequest, request_id: str | None) -> dict
                 "category": row.conversion_action.category.name,
                 "counting_type": row.conversion_action.counting_type.name,
                 "included_in_conversions": row.conversion_action.include_in_conversions_metric,
+                "primary_for_goal": row.conversion_action.primary_for_goal,
+                "phone_call_duration_seconds": row.conversion_action.phone_call_duration_seconds,
                 "default_value": row.conversion_action.value_settings.default_value,
             })
     except Exception as exc:
@@ -1186,10 +1190,9 @@ def get_change_history(request: ToolRequest, request_id: str | None) -> dict:
 
     payload = request.payload or {}
     date_range = payload.get("dateRange", "LAST_14_DAYS")
-    valid_ranges = {
-        "LAST_7_DAYS", "LAST_14_DAYS", "LAST_30_DAYS",
-        "THIS_MONTH", "LAST_MONTH",
-    }
+    # change_event rejects start dates older than 30 days, so LAST_30_DAYS
+    # and LAST_MONTH (which can reach further back) are not allowed here.
+    valid_ranges = {"LAST_7_DAYS", "LAST_14_DAYS", "THIS_MONTH"}
     if date_range not in valid_ranges:
         date_range = "LAST_14_DAYS"
 
@@ -1239,7 +1242,7 @@ def get_change_history(request: ToolRequest, request_id: str | None) -> dict:
         mode="read",
         business_key=request.businessKey,
         request_id=request_id,
-        summary=f"{len(rows)} changes in the last {date_range.lower().replace('_', ' ')}.",
+        summary=f"{len(rows)} changes ({date_range.lower().replace('_', ' ')}).",
         data={"dateRange": date_range, "customerId": customer_id, "rows": rows},
         freshness={"state": "live"},
     )
