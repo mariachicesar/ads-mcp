@@ -29,14 +29,14 @@ mcp = FastMCP(
     instructions=(
         "Tools for viewing GA4 website analytics. "
         "Requires ga4_property_id in the business config (local-dev-config.json or Secrets Manager). "
-        "Always use business_key 'rnr-electrician' or 'gq-painting'."
+        "business_key identifies any onboarded client (see clients/*.json) — not limited to a fixed list."
     ),
 )
 
 
 @mcp.tool()
 def analytics_get_traffic_overview(
-    business_key: Annotated[str, Field(description="Business key: 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     date_range: Annotated[str, Field(description="Date range: LAST_7_DAYS, LAST_30_DAYS, LAST_90_DAYS")] = "LAST_30_DAYS",
 ) -> dict:
     """Get GA4 traffic overview: sessions, users, bounce rate, and conversions broken down by channel group."""
@@ -46,7 +46,7 @@ def analytics_get_traffic_overview(
 
 @mcp.tool()
 def analytics_get_top_pages(
-    business_key: Annotated[str, Field(description="Business key: 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     date_range: Annotated[str, Field(description="Date range: LAST_7_DAYS, LAST_30_DAYS, LAST_90_DAYS")] = "LAST_30_DAYS",
     limit: Annotated[int, Field(description="Number of pages to return", ge=1, le=50)] = 10,
 ) -> dict:

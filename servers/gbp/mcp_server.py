@@ -46,7 +46,7 @@ mcp = FastMCP(
     instructions=(
         "Tools for managing Google Business Profile listings. "
         "Use these tools to respond to reviews, create posts, upload photos, "
-        "and read listing info for RnR Electrician and GQ Custom Painting. "
+        "and read listing info for any onboarded client (see clients/*.json). "
         "Always show proposed review replies to the user before posting. "
         "Always use dry_run=true first for any write operation. "
         "GBP posts publish immediately when executed — use scheduled_time to queue "
@@ -98,7 +98,7 @@ def _save_schedule(queue: list[dict]) -> None:
 
 @mcp.tool()
 def gbp_get_location_info(
-    business_key: Annotated[str, Field(description="Business key: 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
 ) -> dict:
     """Get the current Google Business Profile listing info: name, phone, website, hours, status."""
     def _run():
@@ -119,7 +119,7 @@ def gbp_get_location_info(
 
 @mcp.tool()
 def gbp_list_reviews(
-    business_key: Annotated[str, Field(description="Business key: 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     filter_reply: Annotated[str, Field(description="Filter: 'all', 'unreplied', or 'replied'")] = "all",
     page_size: Annotated[int, Field(description="Number of reviews to return (max 50)")] = 20,
 ) -> dict:
@@ -148,7 +148,7 @@ def gbp_list_reviews(
 
 @mcp.tool()
 def gbp_list_posts(
-    business_key: Annotated[str, Field(description="Business key: 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     page_size: Annotated[int, Field(description="Number of posts to return (max 20)")] = 10,
 ) -> dict:
     """List existing local posts on the GBP listing."""
@@ -170,7 +170,7 @@ def gbp_list_posts(
 
 @mcp.tool()
 def gbp_list_photos(
-    business_key: Annotated[str, Field(description="Business key: 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     page_size: Annotated[int, Field(description="Number of photos to return")] = 20,
 ) -> dict:
     """List photos currently on the GBP listing."""
@@ -196,7 +196,7 @@ def gbp_list_photos(
 
 @mcp.tool()
 def gbp_reply_to_review(
-    business_key: Annotated[str, Field(description="Business key: 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     review_resource_name: Annotated[str, Field(description="Full review resource name from gbp_list_reviews, e.g. 'accounts/123/locations/456/reviews/abc'")],
     reply_text: Annotated[str, Field(description="The reply text to post. Max ~4096 characters.")],
     dry_run: Annotated[bool, Field(description="If true, shows the proposed reply without posting. Always use true first.")] = True,
@@ -271,7 +271,7 @@ def gbp_reply_to_review(
 
 @mcp.tool()
 def gbp_delete_review_reply(
-    business_key: Annotated[str, Field(description="Business key: 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     review_resource_name: Annotated[str, Field(description="Full review resource name from gbp_list_reviews")],
     dry_run: Annotated[bool, Field(description="If true, shows what will be deleted without doing it. Always use true first.")] = True,
     approval_id: Annotated[str | None, Field(description="Required for execute mode (dry_run=false). Copy from the dry-run response.")] = None,
@@ -330,7 +330,7 @@ def gbp_delete_review_reply(
 
 @mcp.tool()
 def gbp_create_post(
-    business_key: Annotated[str, Field(description="Business key: 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     summary: Annotated[str, Field(description="Post body text. Keep it concise (under 1500 characters).")],
     topic_type: Annotated[str, Field(description="Post type: STANDARD, EVENT, OFFER, PRODUCT")] = "STANDARD",
     call_to_action_type: Annotated[str | None, Field(description="CTA button type: BOOK, ORDER, SHOP, LEARN_MORE, SIGN_UP, CALL, GET_OFFER")] = None,
@@ -507,7 +507,7 @@ def gbp_cancel_scheduled_post(
 
 @mcp.tool()
 def gbp_delete_post(
-    business_key: Annotated[str, Field(description="Business key: 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     post_resource_name: Annotated[str, Field(description="Full post resource name from gbp_list_posts")],
     dry_run: Annotated[bool, Field(description="If true, shows what will be deleted without doing it.")] = True,
     approval_id: Annotated[str | None, Field(description="Required for execute mode (dry_run=false). Copy from the dry-run response.")] = None,
@@ -562,7 +562,7 @@ def gbp_delete_post(
 
 @mcp.tool()
 def gbp_upload_photo(
-    business_key: Annotated[str, Field(description="Business key: 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     file_path: Annotated[str, Field(description="Absolute path to the image file (JPEG or PNG) on the local machine")],
     category: Annotated[str, Field(description="Photo category: PROFILE, COVER, LOGO, EXTERIOR, INTERIOR, PRODUCT, AT_WORK, FOOD_AND_DRINK, ADDITIONAL")] = "ADDITIONAL",
     dry_run: Annotated[bool, Field(description="If true, validates the file and shows what will be uploaded without uploading.")] = True,
@@ -643,7 +643,7 @@ def gbp_upload_photo(
 
 @mcp.tool()
 def gbp_delete_photo(
-    business_key: Annotated[str, Field(description="Business key: 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     media_resource_name: Annotated[str, Field(description="Full media resource name from gbp_list_photos")],
     dry_run: Annotated[bool, Field(description="If true, shows what will be deleted without doing it.")] = True,
     approval_id: Annotated[str | None, Field(description="Required for execute mode (dry_run=false). Copy from the dry-run response.")] = None,

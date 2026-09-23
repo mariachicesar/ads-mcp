@@ -87,7 +87,7 @@ def _run_tool(tool_name: str, fn: Callable[[], dict]) -> dict:
 
 @mcp.tool()
 def google_ads_list_accounts(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
 ) -> dict:
     """List all Google Ads accounts accessible under the configured manager account."""
     req = ToolRequest(businessKey=business_key)
@@ -96,7 +96,7 @@ def google_ads_list_accounts(
 
 @mcp.tool()
 def google_ads_get_campaign_performance(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     date_range: Annotated[str, Field(description="Date range, e.g. 'LAST_30_DAYS', 'LAST_7_DAYS', 'THIS_MONTH'")] = "LAST_30_DAYS",
 ) -> dict:
     """Get campaign performance metrics (impressions, clicks, cost, conversions) for a business."""
@@ -106,7 +106,7 @@ def google_ads_get_campaign_performance(
 
 @mcp.tool()
 def google_ads_update_campaign_budget(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     campaign_name: Annotated[str, Field(description="Exact campaign name as it appears in Google Ads")],
     new_daily_budget: Annotated[float, Field(description="New daily budget in USD, e.g. 15.00")],
     dry_run: Annotated[bool, Field(description="If true, shows proposed changes without applying them. Always use true first.")] = True,
@@ -131,7 +131,7 @@ def google_ads_update_campaign_budget(
 
 @mcp.tool()
 def google_ads_list_campaigns(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
 ) -> dict:
     """List all campaigns with status, daily budget, bidding strategy, and dates."""
     req = ToolRequest(businessKey=business_key)
@@ -140,7 +140,7 @@ def google_ads_list_campaigns(
 
 @mcp.tool()
 def google_ads_get_ad_group_performance(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     date_range: Annotated[str, Field(description="Date range, e.g. 'LAST_30_DAYS', 'LAST_7_DAYS', 'THIS_MONTH'")] = "LAST_30_DAYS",
     campaign_name: Annotated[str | None, Field(description="Optional: filter to a specific campaign name")] = None,
 ) -> dict:
@@ -154,7 +154,7 @@ def google_ads_get_ad_group_performance(
 
 @mcp.tool()
 def google_ads_get_keyword_performance(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     date_range: Annotated[str, Field(description="Date range, e.g. 'LAST_30_DAYS', 'LAST_7_DAYS', 'THIS_MONTH'")] = "LAST_30_DAYS",
     campaign_name: Annotated[str | None, Field(description="Optional: filter to a specific campaign name")] = None,
 ) -> dict:
@@ -168,7 +168,7 @@ def google_ads_get_keyword_performance(
 
 @mcp.tool()
 def google_ads_get_search_terms_report(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     date_range: Annotated[str, Field(description="Date range, e.g. 'LAST_30_DAYS', 'LAST_7_DAYS', 'THIS_MONTH'")] = "LAST_30_DAYS",
     campaign_name: Annotated[str | None, Field(description="Optional: filter to a specific campaign name")] = None,
 ) -> dict:
@@ -182,7 +182,7 @@ def google_ads_get_search_terms_report(
 
 @mcp.tool()
 def google_ads_set_campaign_status(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     campaign_name: Annotated[str, Field(description="Exact campaign name as it appears in Google Ads")],
     status: Annotated[str, Field(description="New status: 'ENABLED' or 'PAUSED'")],
     dry_run: Annotated[bool, Field(description="If true, shows proposed changes without applying them. Always use true first.")] = True,
@@ -205,7 +205,7 @@ def google_ads_set_campaign_status(
 
 @mcp.tool()
 def google_ads_set_ad_group_status(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     ad_group_name: Annotated[str, Field(description="Exact ad group name as it appears in Google Ads")],
     status: Annotated[str, Field(description="New status: 'ENABLED' or 'PAUSED'")],
     campaign_name: Annotated[str | None, Field(description="Optional: campaign name to disambiguate if ad group name is not unique")] = None,
@@ -227,7 +227,7 @@ def google_ads_set_ad_group_status(
 
 @mcp.tool()
 def google_ads_get_impression_share(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     date_range: Annotated[str, Field(description="Date range, e.g. 'LAST_30_DAYS', 'LAST_7_DAYS', 'THIS_MONTH'")] = "LAST_30_DAYS",
 ) -> dict:
     """Get search impression share, budget lost IS, rank lost IS, and absolute top IS by campaign. Essential for diagnosing visibility gaps."""
@@ -237,7 +237,7 @@ def google_ads_get_impression_share(
 
 @mcp.tool()
 def google_ads_get_ad_performance(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     date_range: Annotated[str, Field(description="Date range, e.g. 'LAST_30_DAYS', 'LAST_7_DAYS', 'THIS_MONTH'")] = "LAST_30_DAYS",
     campaign_name: Annotated[str | None, Field(description="Optional: filter to a specific campaign name")] = None,
 ) -> dict:
@@ -251,7 +251,7 @@ def google_ads_get_ad_performance(
 
 @mcp.tool()
 def google_ads_get_device_performance(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     date_range: Annotated[str, Field(description="Date range, e.g. 'LAST_30_DAYS', 'LAST_7_DAYS', 'THIS_MONTH'")] = "LAST_30_DAYS",
     campaign_name: Annotated[str | None, Field(description="Optional: filter to a specific campaign name")] = None,
 ) -> dict:
@@ -265,7 +265,7 @@ def google_ads_get_device_performance(
 
 @mcp.tool()
 def google_ads_get_geo_performance(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     date_range: Annotated[str, Field(description="Date range, e.g. 'LAST_30_DAYS', 'LAST_7_DAYS', 'THIS_MONTH'")] = "LAST_30_DAYS",
     campaign_name: Annotated[str | None, Field(description="Optional: filter to a specific campaign name")] = None,
 ) -> dict:
@@ -279,7 +279,7 @@ def google_ads_get_geo_performance(
 
 @mcp.tool()
 def google_ads_get_schedule_performance(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     date_range: Annotated[str, Field(description="Date range, e.g. 'LAST_30_DAYS', 'LAST_7_DAYS', 'THIS_MONTH'")] = "LAST_30_DAYS",
     campaign_name: Annotated[str | None, Field(description="Optional: filter to a specific campaign name")] = None,
 ) -> dict:
@@ -293,7 +293,7 @@ def google_ads_get_schedule_performance(
 
 @mcp.tool()
 def google_ads_get_audience_performance(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     date_range: Annotated[str, Field(description="Date range, e.g. 'LAST_30_DAYS', 'LAST_7_DAYS', 'THIS_MONTH'")] = "LAST_30_DAYS",
     campaign_name: Annotated[str | None, Field(description="Optional: filter to a specific campaign name")] = None,
 ) -> dict:
@@ -307,7 +307,7 @@ def google_ads_get_audience_performance(
 
 @mcp.tool()
 def google_ads_get_conversion_actions(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
 ) -> dict:
     """List all conversion actions configured in the account (calls, form fills, etc.) with their status and counting type."""
     req = ToolRequest(businessKey=business_key)
@@ -316,7 +316,7 @@ def google_ads_get_conversion_actions(
 
 @mcp.tool()
 def google_ads_get_change_history(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     date_range: Annotated[str, Field(description="Date range, e.g. 'LAST_7_DAYS', 'LAST_14_DAYS', 'LAST_30_DAYS'")] = "LAST_14_DAYS",
 ) -> dict:
     """Get the change history log — who changed what, when. Useful for auditing recent modifications to campaigns."""
@@ -326,7 +326,7 @@ def google_ads_get_change_history(
 
 @mcp.tool()
 def google_ads_get_recommendations(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
 ) -> dict:
     """Get Google's optimization recommendations for the account (budget increases, bid adjustments, keyword suggestions, etc.)."""
     req = ToolRequest(businessKey=business_key)
@@ -335,7 +335,7 @@ def google_ads_get_recommendations(
 
 @mcp.tool()
 def google_ads_get_negative_keywords(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     campaign_name: Annotated[str | None, Field(description="Optional: filter to a specific campaign. Omit to return all campaigns.")] = None,
 ) -> dict:
     """List all negative keywords on a campaign (or all campaigns). Use this before adding a negative to check for duplicates."""
@@ -345,7 +345,7 @@ def google_ads_get_negative_keywords(
 
 @mcp.tool()
 def google_ads_add_negative_keyword(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     campaign_name: Annotated[str, Field(description="Exact campaign name to add the negative keyword to")],
     keyword_text: Annotated[str, Field(description="The keyword text to block, e.g. 'free electrician'")],
     match_type: Annotated[str, Field(description="Match type: 'BROAD', 'PHRASE', or 'EXACT'")] = "EXACT",
@@ -368,7 +368,7 @@ def google_ads_add_negative_keyword(
 
 @mcp.tool()
 def google_ads_update_keyword_bid(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     keyword_text: Annotated[str, Field(description="Exact keyword text to update the bid for")],
     new_cpc_bid: Annotated[float, Field(description="New max CPC bid in USD, e.g. 5.50")],
     campaign_name: Annotated[str | None, Field(description="Optional: campaign name to disambiguate the keyword")] = None,
@@ -392,7 +392,7 @@ def google_ads_update_keyword_bid(
 
 @mcp.tool()
 def google_ads_update_ad_status(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     ad_id: Annotated[str, Field(description="Numeric Google Ads ad ID (from get_ad_performance)")],
     status: Annotated[str, Field(description="New status: 'ENABLED' or 'PAUSED'")],
     dry_run: Annotated[bool, Field(description="If true, shows proposed changes without applying them. Always use true first.")] = True,
@@ -414,7 +414,7 @@ def google_ads_update_ad_status(
 
 @mcp.tool()
 def google_ads_create_rsa(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     campaign_name: Annotated[str, Field(description="Exact campaign name for the new ad")],
     ad_group_name: Annotated[str, Field(description="Exact ad group name for the new ad")],
     final_url: Annotated[str, Field(description="Landing page URL for the ad, e.g. 'https://example.com/electrician'")],
@@ -446,7 +446,7 @@ def google_ads_create_rsa(
 
 @mcp.tool()
 def google_ads_update_campaign_bidding_strategy(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     campaign_name: Annotated[str, Field(description="Exact campaign name as it appears in Google Ads")],
     bidding_strategy: Annotated[str, Field(description="Strategy: MAXIMIZE_CLICKS, MAXIMIZE_CONVERSIONS, TARGET_CPA, TARGET_ROAS, or MANUAL_CPC")],
     target_cpa_micros: Annotated[int | None, Field(description="Target CPA in micros (e.g. 50000000 = $50). Required for TARGET_CPA.")] = None,
@@ -474,7 +474,7 @@ def google_ads_update_campaign_bidding_strategy(
 
 @mcp.tool()
 def google_ads_add_keyword(
-    business_key: Annotated[str, Field(description="Business key, e.g. 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     campaign_name: Annotated[str, Field(description="Exact campaign name as it appears in Google Ads")],
     ad_group_name: Annotated[str, Field(description="Exact ad group name to add the keyword to")],
     keyword_text: Annotated[str, Field(description="Keyword text to add, e.g. 'electrician near me'")],

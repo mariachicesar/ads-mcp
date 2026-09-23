@@ -27,7 +27,7 @@ mcp = FastMCP(
     name="content-agent",
     instructions=(
         "Tools for generating ad copy, landing page content, and social posts "
-        "for RnR Electrician and GQ Custom Painting. "
+        "for any onboarded client (see clients/*.json). "
         "Always use the correct business key so brand voice and service area are accurate. "
         "Content generation requires Claude API integration — currently returns drafts as placeholders."
     ),
@@ -36,7 +36,7 @@ mcp = FastMCP(
 
 @mcp.tool()
 def content_write_google_ad(
-    business_key: Annotated[str, Field(description="Business key: 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     keyword: Annotated[str, Field(description="Target keyword for the ad, e.g. 'electrician near me'")],
     city: Annotated[str, Field(description="Target city for geo-specific copy, e.g. 'Pasadena'")] = "",
     topic: Annotated[str, Field(description="Optional topic or angle for the ad, e.g. 'emergency service'")] = "",

@@ -30,7 +30,7 @@ mcp = FastMCP(
     instructions=(
         "Tools for viewing Google Search Console organic search data. "
         "Requires site_url in the business config (local-dev-config.json or Secrets Manager). "
-        "Always use business_key 'rnr-electrician' or 'gq-painting'."
+        "business_key identifies any onboarded client (see clients/*.json) — not limited to a fixed list."
     ),
 )
 
@@ -52,7 +52,7 @@ def _run_tool(tool_name: str, fn: Callable[[], dict]) -> dict:
 
 @mcp.tool()
 def search_console_get_search_performance(
-    business_key: Annotated[str, Field(description="Business key: 'rnr-electrician' or 'gq-painting'")],
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
     date_range: Annotated[str, Field(description="Date range: LAST_7_DAYS, LAST_28_DAYS, LAST_30_DAYS, LAST_90_DAYS")] = "LAST_30_DAYS",
     dimension: Annotated[str, Field(description="Group results by: 'query', 'page', 'country', or 'device'")] = "query",
     limit: Annotated[int, Field(description="Max rows to return", ge=1, le=100)] = 25,
