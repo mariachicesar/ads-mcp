@@ -143,7 +143,5 @@ def get_signing_secret(key_id: str, settings: Settings) -> str | None:
 
 
 def get_platform_config(platform: str, business_key: str, settings: Settings) -> Any:
-    if not settings.aws_region:
-        return None
     secret_id = f"/ads-mcp/{business_key}/{platform}/config"
     return get_secret(secret_id, settings)
