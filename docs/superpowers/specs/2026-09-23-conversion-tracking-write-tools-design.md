@@ -128,8 +128,8 @@ All four tools follow the existing write pattern in `servers/google-ads/tools/wr
 | `analytics_link_google_ads` | `business_key` | Existing Google Ads links on the property | `create_google_ads_link` with the customer ID taken from the **same client's google-ads manifest config** |
 
 `analytics_link_google_ads` deliberately takes no customer ID argument, so a call cannot link GA4
-to another client's Ads account. If the client has no google-ads config, it fails with
-`REQUEST_INVALID`.
+to another client's Ads account. If the client has no google-ads config, it fails with the
+config loader's existing `PLATFORM_NOT_CONFIGURED` error.
 
 ### Google Ads server
 
