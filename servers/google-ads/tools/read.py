@@ -1258,7 +1258,7 @@ def get_recommendations(request: ToolRequest, request_id: str | None) -> dict:
 
     query = """
         SELECT
-          recommendation.type_,
+                    recommendation.type,
           recommendation.impact.base_metrics.impressions,
           recommendation.impact.potential_metrics.impressions,
           recommendation.impact.base_metrics.clicks,
@@ -1267,7 +1267,7 @@ def get_recommendations(request: ToolRequest, request_id: str | None) -> dict:
           recommendation.ad_group,
           recommendation.resource_name
         FROM recommendation
-        ORDER BY recommendation.type_ ASC
+        ORDER BY recommendation.type ASC
         LIMIT 50
     """
 

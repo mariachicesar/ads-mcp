@@ -91,3 +91,25 @@ def test_change_history_summary_reads_cleanly(monkeypatch):
     response = read.get_change_history(ToolRequest(businessKey="el-cuis", payload={"dateRange": "LAST_7_DAYS"}), None)
 
     assert response["summary"] == "0 changes (last 7 days)."
+
+
+def test_get_recommendations_uses_gaql_type_field(monkeypatch):
+    row = SimpleNamespace(recommendation=SimpleNamespace(
+        type_=_enum("KEYWORD"),
+        impact=SimpleNamespace(
+            base_metrics=SimpleNamespace(impressions=10, clicks=2),
+            potential_metrics=SimpleNamespace(impressions=20, clicks=4),
+        ),
+        resource_name="customers/123/recommendations/456",
+        campaign="",
+        ad_group="",
+    ))
+    service = _patch_client(monkeypatch, [row])
+
+    response = read.get_recommendations(ToolRequest(businessKey="el-cuis"), None)
+
+    query = service.queries[0]
+    assert "recommendation.type," in query
+    assert "ORDER BY recommendation.type ASC" in query
+    assert "recommendation.type_" not in query
+    assert response["data"]["rows"][0]["type"] == "KEYWORD"
