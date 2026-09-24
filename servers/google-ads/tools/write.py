@@ -17,6 +17,8 @@ from shared.google_ads_client import (
     add_keyword_to_ad_group,
     get_conversion_action_snapshot,
     mutate_conversion_action,
+    get_customer_settings_snapshot,
+    mutate_customer_auto_tagging,
 )
 from shared.responses import build_change, build_success_response
 from shared.rules import evaluate_google_ads_mutation_rules
@@ -1371,6 +1373,109 @@ def update_conversion_action(request, request_id: str | None) -> dict:
         rule_checks=rule_checks,
         changes=changes,
         data={**data, **mutation_result},
+        requires_confirmation=False,
+        executed=True,
+    )
+
+
+def set_auto_tagging(request, request_id: str | None) -> dict:
+    tool = "set_auto_tagging"
+    enabled = (request.payload or {}).get("enabled")
+    if not isinstance(enabled, bool):
+        raise AdsMcpError(
+            status_code=400,
+            error_code="REQUEST_INVALID",
+            message="enabled must be true or false.",
+            tool=tool,
+        )
+
+    rule_checks = evaluate_google_ads_mutation_rules(
+        business_key=request.businessKey,
+        payload={},
+        change_type="account_setting",
+    )
+
+    config = load_google_ads_sdk_config(business_key=request.businessKey, tool=tool)
+    snapshot = get_customer_settings_snapshot(config, tool=tool)
+    is_dry_run = request.dryRun is not False
+    state = "on" if enabled else "off"
+
+    if snapshot["autoTaggingEnabled"] == enabled:
+        return build_success_response(
+            service=SERVICE_NAME,
+            tool=tool,
+            mode="dry-run" if is_dry_run else "execute",
+            business_key=request.businessKey,
+            request_id=request_id,
+            summary=f"No change: auto-tagging is already {state}.",
+            rule_checks=rule_checks,
+            changes=[],
+            data=snapshot,
+            requires_confirmation=False,
+            executed=False,
+        )
+
+    changes = [
+        build_change(
+            field="customer.auto_tagging_enabled",
+            label="Auto-tagging",
+            before=snapshot["autoTaggingEnabled"],
+            after=enabled,
+            status="proposed",
+            resource_type="customer",
+            resource_id=snapshot["customerAccountId"],
+        )
+    ]
+
+    if is_dry_run:
+        return build_success_response(
+            service=SERVICE_NAME,
+            tool=tool,
+            mode="dry-run",
+            business_key=request.businessKey,
+            request_id=request_id,
+            summary=f"Would turn auto-tagging {state}.",
+            rule_checks=rule_checks,
+            changes=changes,
+            data=snapshot,
+            requires_confirmation=True,
+            executed=False,
+        )
+
+    if not request.approvalId:
+        raise AdsMcpError(
+            status_code=400,
+            error_code="BUSINESS_RULE_BLOCKED",
+            message="approvalId is required for execute requests.",
+            retryable=False,
+            rule_checks=rule_checks,
+            tool=tool,
+        )
+
+    if any(not check["passed"] for check in rule_checks):
+        raise AdsMcpError(
+            status_code=400,
+            error_code="BUSINESS_RULE_BLOCKED",
+            message="Execution blocked by business rules.",
+            retryable=False,
+            rule_checks=rule_checks,
+            tool=tool,
+        )
+
+    mutation_result = mutate_customer_auto_tagging(
+        config, resource_name=snapshot["resourceName"], enabled=enabled, tool=tool,
+    )
+    changes[0]["status"] = "applied"
+    return build_success_response(
+        service=SERVICE_NAME,
+        tool=tool,
+        mode="execute",
+        business_key=request.businessKey,
+        request_id=request_id,
+        summary=f"Turned auto-tagging {state}.",
+        rule_checks=rule_checks,
+        changes=changes,
+        data=mutation_result,
         requires_confirmation=False,
         executed=True,
     )

@@ -1144,3 +1144,72 @@ def mutate_conversion_action(
         "resourceName": getattr(result, "resource_name", resource_name),
         "updatedFields": list(updates.keys()),
     }
+
+
+def get_customer_settings_snapshot(config: dict[str, Any], *, tool: str | None = None) -> dict[str, Any]:
+    client = build_google_ads_client(config, tool=tool)
+    customer_id = get_google_ads_customer_id(config, tool=tool)
+    google_ads_service = client.get_service("GoogleAdsService")
+    query = "SELECT customer.resource_name, customer.auto_tagging_enabled FROM customer LIMIT 1"
+
+    try:
+        row = next(iter(google_ads_service.search(customer_id=customer_id, query=query)), None)
+    except Exception as exc:
+        raise AdsMcpError(
+            status_code=502,
+            error_code="UPSTREAM_ERROR",
+            message="Google Ads customer settings lookup failed.",
+            tool=tool,
+            retryable=True,
+            details={"reason": str(exc)},
+        ) from exc
+
+    if row is None:
+        raise AdsMcpError(
+            status_code=404,
+            error_code="REQUEST_INVALID",
+            message=f"Google Ads customer {customer_id} was not found.",
+            tool=tool,
+        )
+
+    return {
+        "customerAccountId": customer_id,
+        "resourceName": row.customer.resource_name,
+        "autoTaggingEnabled": bool(row.customer.auto_tagging_enabled),
+    }
+
+
+def mutate_customer_auto_tagging(
+    config: dict[str, Any],
+    *,
+    resource_name: str,
+    enabled: bool,
+    tool: str | None = None,
+) -> dict[str, Any]:
+    client = build_google_ads_client(config, tool=tool)
+    customer_id = get_google_ads_customer_id(config, tool=tool)
+
+    try:
+        customer_service = client.get_service("CustomerService")
+        operation = client.get_type("CustomerOperation")
+        operation.update.resource_name = resource_name
+        operation.update.auto_tagging_enabled = enabled
+        # Explicit path so enabled=False is not dropped by default-diffing.
+        operation.update_mask.paths.append("auto_tagging_enabled")
+        response = customer_service.mutate_customer(customer_id=customer_id, operation=operation)
+    except Exception as exc:
+        raise AdsMcpError(
+            status_code=502,
+            error_code="UPSTREAM_ERROR",
+            message="Google Ads auto-tagging update failed.",
+            tool=tool,
+            retryable=True,
+            details={"reason": str(exc)},
+        ) from exc
+
+    result = getattr(response, "result", None)
+    return {
+        "customerAccountId": customer_id,
+        "resourceName": getattr(result, "resource_name", None) or resource_name,
+        "autoTaggingEnabled": enabled,
+    }

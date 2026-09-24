@@ -55,6 +55,7 @@ from tools.write import (
     update_campaign_bidding_strategy,
     add_keyword,
     update_conversion_action,
+    set_auto_tagging,
 )
 from tools.knowledge import query_ads_knowledge
 
@@ -539,6 +540,22 @@ def google_ads_update_conversion_action(
         },
     )
     return _run_tool("google_ads_update_conversion_action", lambda: update_conversion_action(req, request_id=None))
+
+
+@mcp.tool()
+def google_ads_set_auto_tagging(
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
+    enabled: Annotated[bool, Field(description="True to turn account auto-tagging (gclid) on, False to turn it off")],
+    dry_run: Annotated[bool, Field(description="If true, shows proposed changes without applying them. Always use true first.")] = True,
+    approval_id: Annotated[str | None, Field(description="Required for execute mode (dry_run=false). Copy from the dry-run response.")] = None,
+) -> dict:
+    """Turn Google Ads account auto-tagging on or off. GA4 conversion import needs it on.
+
+    IMPORTANT: Always call with dry_run=true first. Show the user the proposed
+    changes and only call with dry_run=false after they explicitly approve.
+    """
+    req = ToolRequest(businessKey=business_key, dryRun=dry_run, approvalId=approval_id, payload={"enabled": enabled})
+    return _run_tool("google_ads_set_auto_tagging", lambda: set_auto_tagging(req, request_id=None))
 
 
 @mcp.tool()
