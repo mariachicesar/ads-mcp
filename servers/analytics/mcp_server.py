@@ -24,7 +24,7 @@ from pydantic import Field
 from shared.errors import AdsMcpError
 from shared.models import ToolRequest
 from tools.read import get_traffic_overview, get_top_pages
-from tools.write import create_key_event
+from tools.write import create_key_event, link_google_ads
 
 mcp = FastMCP(
     name="analytics",
@@ -90,6 +90,23 @@ def analytics_create_key_event(
     req = ToolRequest(businessKey=business_key, dryRun=dry_run, approvalId=approval_id,
                       payload={"eventName": event_name, "countingMethod": counting_method})
     return _run_tool("analytics_create_key_event", lambda: create_key_event(req, request_id=None))
+
+
+@mcp.tool()
+def analytics_link_google_ads(
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
+    dry_run: Annotated[bool, Field(description="If true, shows proposed changes without applying them. Always use true first.")] = True,
+    approval_id: Annotated[str | None, Field(description="Required for execute mode (dry_run=false). Copy from the dry-run response.")] = None,
+) -> dict:
+    """Link the client's GA4 property to the Google Ads account in the same client's manifest.
+
+    Takes no customer ID on purpose, so it can't link to another client's account.
+    Requires the analytics.edit OAuth scope for execute.
+    IMPORTANT: Always call with dry_run=true first. Show the user the proposed
+    changes and only call with dry_run=false after they explicitly approve.
+    """
+    req = ToolRequest(businessKey=business_key, dryRun=dry_run, approvalId=approval_id)
+    return _run_tool("analytics_link_google_ads", lambda: link_google_ads(req, request_id=None))
 
 
 if __name__ == "__main__":

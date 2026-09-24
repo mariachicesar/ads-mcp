@@ -142,3 +142,70 @@ def test_other_upstream_errors_map_to_upstream_error(admin):
 
     assert exc.value.error_code == "UPSTREAM_ERROR"
     assert exc.value.retryable is True
+
+
+@pytest.fixture
+def ads_config(monkeypatch):
+    monkeypatch.setattr(write, "load_google_ads_config", lambda **kw: {"customer_account_id": "294-342-5139"})
+
+
+def _link_request(dry_run=True, approval_id=None):
+    return ToolRequest(businessKey="el-cuis", dryRun=dry_run, approvalId=approval_id)
+
+
+def test_link_dry_run_uses_clients_own_customer_id(admin, ads_config):
+    admin.links = [SimpleNamespace(customer_id="1111111111")]
+
+    response = write.link_google_ads(_link_request(), None)
+
+    assert response["requiresConfirmation"] is True
+    assert response["changes"][0]["after"] == "2943425139"
+    assert response["data"]["linkedCustomerIds"] == ["1111111111"]
+    assert response["ruleChecks"][0]["rule"] == "ads-link-same-client"
+    assert admin.created == []
+
+
+def test_link_execute_requires_approval(admin, ads_config):
+    with pytest.raises(AdsMcpError) as exc:
+        write.link_google_ads(_link_request(dry_run=False), None)
+
+    assert exc.value.error_code == "BUSINESS_RULE_BLOCKED"
+
+
+def test_link_execute_creates_link(admin, ads_config):
+    response = write.link_google_ads(_link_request(dry_run=False, approval_id="ok"), None)
+
+    parent, link = admin.created[0]
+    assert parent == "properties/554624356"
+    assert link.customer_id == "2943425139"
+    assert response["executed"] is True
+
+
+def test_link_already_present_is_no_op(admin, ads_config):
+    admin.links = [SimpleNamespace(customer_id="2943425139")]
+
+    response = write.link_google_ads(_link_request(dry_run=False, approval_id="ok"), None)
+
+    assert response["changes"] == [] and response["executed"] is False
+    assert admin.created == []
+
+
+def test_link_without_google_ads_platform_fails(admin, monkeypatch):
+    def missing(**kw):
+        raise AdsMcpError(status_code=404, error_code="PLATFORM_NOT_CONFIGURED", message="nope")
+
+    monkeypatch.setattr(write, "load_google_ads_config", missing)
+
+    with pytest.raises(AdsMcpError) as exc:
+        write.link_google_ads(_link_request(), None)
+
+    assert exc.value.error_code == "PLATFORM_NOT_CONFIGURED"
+
+
+def test_link_scope_error(admin, ads_config):
+    admin.fail_with = google_exceptions.PermissionDenied("Request had insufficient authentication scopes.")
+
+    with pytest.raises(AdsMcpError) as exc:
+        write.link_google_ads(_link_request(dry_run=False, approval_id="ok"), None)
+
+    assert exc.value.error_code == "AUTH_SCOPE_MISSING"

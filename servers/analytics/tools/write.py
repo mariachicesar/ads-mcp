@@ -210,3 +210,98 @@ def create_key_event(request: ToolRequest, request_id: str | None) -> dict:
         requires_confirmation=False,
         executed=True,
     )
+
+
+def link_google_ads(request: ToolRequest, request_id: str | None) -> dict:
+    tool = "link_google_ads"
+    # The customer ID comes only from this client's own manifest, so a call can
+    # never link GA4 to another client's Ads account.
+    ads_config = load_google_ads_config(business_key=request.businessKey, tool=tool)
+    customer_id = str(ads_config["customer_account_id"]).replace("-", "").strip()
+
+    rule_checks = [
+        build_rule_check(
+            rule="ads-link-same-client",
+            passed=True,
+            message=f"Links only to {customer_id}, the Google Ads account in {request.businessKey}'s own manifest.",
+        )
+    ]
+
+    config = _load_analytics_config(request.businessKey, tool)
+    client = _build_admin_client(config)
+    parent = _property(config)
+
+    try:
+        links = list(client.list_google_ads_links(parent=parent))
+    except Exception as exc:
+        raise _upstream_error(exc, tool=tool, action="Google Ads link lookup") from exc
+
+    linked = sorted(str(link.customer_id) for link in links)
+    data = {"propertyId": str(config["property_id"]), "customerId": customer_id, "linkedCustomerIds": linked}
+    is_dry_run = request.dryRun is not False
+
+    if customer_id in linked:
+        return build_success_response(
+            service=SERVICE_NAME,
+            tool=tool,
+            mode="dry-run" if is_dry_run else "execute",
+            business_key=request.businessKey,
+            request_id=request_id,
+            summary=f"No change: GA4 is already linked to Google Ads {customer_id}.",
+            rule_checks=rule_checks,
+            changes=[],
+            data=data,
+            requires_confirmation=False,
+            executed=False,
+        )
+
+    changes = [
+        build_change(
+            field="google_ads_link",
+            label="Google Ads link",
+            before=linked or None,
+            after=customer_id,
+            status="proposed",
+            resource_type="google_ads_link",
+        )
+    ]
+
+    if is_dry_run:
+        return build_success_response(
+            service=SERVICE_NAME,
+            tool=tool,
+            mode="dry-run",
+            business_key=request.businessKey,
+            request_id=request_id,
+            summary=f"Would link GA4 property {config['property_id']} to Google Ads {customer_id}.",
+            rule_checks=rule_checks,
+            changes=changes,
+            data=data,
+            requires_confirmation=True,
+            executed=False,
+        )
+
+    _require_approval(request, tool, rule_checks)
+
+    try:
+        created = client.create_google_ads_link(
+            parent=parent,
+            google_ads_link=GoogleAdsLink(customer_id=customer_id),
+        )
+    except Exception as exc:
+        raise _upstream_error(exc, tool=tool, action="Google Ads link creation") from exc
+
+    changes[0]["status"] = "applied"
+    return build_success_response(
+        service=SERVICE_NAME,
+        tool=tool,
+        mode="execute",
+        business_key=request.businessKey,
+        request_id=request_id,
+        summary=f"Linked GA4 property {config['property_id']} to Google Ads {customer_id}.",
+        rule_checks=rule_checks,
+        changes=changes,
+        data={**data, "linkResourceName": created.name},
+        requires_confirmation=False,
+        executed=True,
+    )
