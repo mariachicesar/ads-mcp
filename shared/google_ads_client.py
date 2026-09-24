@@ -1004,3 +1004,143 @@ def add_keyword_to_ad_group(
         "maxCpcBidMicros": max_cpc_bid_micros,
         "maxCpcBid": max_cpc_bid_micros / 1_000_000 if max_cpc_bid_micros is not None else None,
     }
+
+
+def get_conversion_action_snapshot(
+    config: dict[str, Any],
+    *,
+    conversion_name: str,
+    tool: str | None = None,
+) -> dict[str, Any]:
+    client = build_google_ads_client(config, tool=tool)
+    customer_id = get_google_ads_customer_id(config, tool=tool)
+    google_ads_service = client.get_service("GoogleAdsService")
+
+    query = f"""
+        SELECT
+          conversion_action.resource_name,
+          conversion_action.id,
+          conversion_action.name,
+          conversion_action.status,
+          conversion_action.type,
+          conversion_action.primary_for_goal,
+          conversion_action.phone_call_duration_seconds,
+          conversion_action.value_settings.default_value,
+          conversion_action.value_settings.always_use_default_value
+        FROM conversion_action
+        WHERE conversion_action.name = '{_escape_gaql_string(conversion_name)}'
+          AND conversion_action.status != 'REMOVED'
+    """
+
+    try:
+        rows = list(google_ads_service.search(customer_id=customer_id, query=query))
+    except Exception as exc:
+        raise AdsMcpError(
+            status_code=502,
+            error_code="UPSTREAM_ERROR",
+            message="Google Ads conversion action lookup failed.",
+            tool=tool,
+            retryable=True,
+            details={"reason": str(exc)},
+        ) from exc
+
+    if not rows:
+        raise AdsMcpError(
+            status_code=404,
+            error_code="REQUEST_INVALID",
+            message=f"Conversion action '{conversion_name}' was not found in Google Ads.",
+            tool=tool,
+            details={"conversionName": conversion_name},
+        )
+    if len(rows) > 1:
+        raise AdsMcpError(
+            status_code=409,
+            error_code="REQUEST_INVALID",
+            message=(
+                f"{len(rows)} conversion actions are named '{conversion_name}'. "
+                "Rename one in Google Ads so the update can't hit the wrong one."
+            ),
+            tool=tool,
+            details={"conversionName": conversion_name},
+        )
+
+    action = rows[0].conversion_action
+    return {
+        "customerAccountId": customer_id,
+        "resourceName": action.resource_name,
+        "conversionId": str(action.id),
+        "name": action.name,
+        "status": action.status.name,
+        "type": action.type_.name,
+        "primaryForGoal": bool(action.primary_for_goal),
+        "phoneCallDurationSeconds": int(action.phone_call_duration_seconds),
+        "defaultValue": float(action.value_settings.default_value),
+        "alwaysUseDefaultValue": bool(action.value_settings.always_use_default_value),
+    }
+
+
+_CONVERSION_UPDATE_PATHS = (
+    "status",
+    "primary_for_goal",
+    "value_settings.default_value",
+    "value_settings.always_use_default_value",
+    "phone_call_duration_seconds",
+)
+
+
+def mutate_conversion_action(
+    config: dict[str, Any],
+    *,
+    resource_name: str,
+    updates: dict[str, Any],
+    tool: str | None = None,
+) -> dict[str, Any]:
+    unknown = [path for path in updates if path not in _CONVERSION_UPDATE_PATHS]
+    if unknown:
+        raise AdsMcpError(
+            status_code=400,
+            error_code="REQUEST_INVALID",
+            message=f"Unsupported conversion action fields: {', '.join(unknown)}.",
+            tool=tool,
+        )
+
+    client = build_google_ads_client(config, tool=tool)
+    customer_id = get_google_ads_customer_id(config, tool=tool)
+
+    try:
+        conversion_service = client.get_service("ConversionActionService")
+        operation = client.get_type("ConversionActionOperation")
+        action = operation.update
+        action.resource_name = resource_name
+        for path, value in updates.items():
+            if path == "status":
+                action.status = getattr(client.enums.ConversionActionStatusEnum, value)
+            elif path == "value_settings.default_value":
+                action.value_settings.default_value = value
+            elif path == "value_settings.always_use_default_value":
+                action.value_settings.always_use_default_value = value
+            else:
+                setattr(action, path, value)
+        # Explicit paths: protobuf_helpers.field_mask() diffs against defaults
+        # and would silently drop updates like primary_for_goal=False.
+        operation.update_mask.paths.extend(updates.keys())
+        response = conversion_service.mutate_conversion_actions(
+            customer_id=customer_id,
+            operations=[operation],
+        )
+    except Exception as exc:
+        raise AdsMcpError(
+            status_code=502,
+            error_code="UPSTREAM_ERROR",
+            message="Google Ads conversion action update failed.",
+            tool=tool,
+            retryable=True,
+            details={"reason": str(exc)},
+        ) from exc
+
+    result = response.results[0] if response.results else None
+    return {
+        "customerAccountId": customer_id,
+        "resourceName": getattr(result, "resource_name", resource_name),
+        "updatedFields": list(updates.keys()),
+    }

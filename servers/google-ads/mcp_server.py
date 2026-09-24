@@ -54,6 +54,7 @@ from tools.write import (
     create_rsa,
     update_campaign_bidding_strategy,
     add_keyword,
+    update_conversion_action,
 )
 from tools.knowledge import query_ads_knowledge
 
@@ -504,6 +505,40 @@ def google_ads_add_keyword(
         payload=payload,
     )
     return _run_tool("google_ads_add_keyword", lambda: add_keyword(req, request_id=None))
+
+
+@mcp.tool()
+def google_ads_update_conversion_action(
+    business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
+    conversion_name: Annotated[str, Field(description="Exact conversion action name as shown in Google Ads, e.g. 'Calls from ads' or an imported GA4 event like 'booking_confirmed'")],
+    status: Annotated[str | None, Field(description="'ENABLED' (e.g. to turn on a HIDDEN imported GA4 conversion) or 'HIDDEN'")] = None,
+    primary_for_goal: Annotated[bool | None, Field(description="True = Primary (used for bidding), False = Secondary (reporting only)")] = None,
+    default_value: Annotated[float | None, Field(description="Conversion value in account currency. Also turns on 'always use default value'.", ge=0)] = None,
+    phone_call_duration_seconds: Annotated[int | None, Field(description="Call conversions (AD_CALL) only: minimum call length in seconds to count", ge=0)] = None,
+    dry_run: Annotated[bool, Field(description="If true, shows proposed changes without applying them. Always use true first.")] = True,
+    approval_id: Annotated[str | None, Field(description="Required for execute mode (dry_run=false). Copy from the dry-run response.")] = None,
+) -> dict:
+    """Update a conversion action's status, primary/secondary goal, value, or minimum call length.
+
+    Only the fields you pass are changed. Imported GA4 conversions start as HIDDEN;
+    set status='ENABLED' to import them.
+
+    IMPORTANT: Always call with dry_run=true first. Show the user the proposed
+    changes and only call with dry_run=false after they explicitly approve.
+    """
+    req = ToolRequest(
+        businessKey=business_key,
+        dryRun=dry_run,
+        approvalId=approval_id,
+        payload={
+            "conversionName": conversion_name,
+            "status": status,
+            "primaryForGoal": primary_for_goal,
+            "defaultValue": default_value,
+            "phoneCallDurationSeconds": phone_call_duration_seconds,
+        },
+    )
+    return _run_tool("google_ads_update_conversion_action", lambda: update_conversion_action(req, request_id=None))
 
 
 @mcp.tool()

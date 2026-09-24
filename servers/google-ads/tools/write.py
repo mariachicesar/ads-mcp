@@ -15,6 +15,8 @@ from shared.google_ads_client import (
     mutate_campaign_bidding_strategy,
     get_ad_group_keywords_snapshot,
     add_keyword_to_ad_group,
+    get_conversion_action_snapshot,
+    mutate_conversion_action,
 )
 from shared.responses import build_change, build_success_response
 from shared.rules import evaluate_google_ads_mutation_rules
@@ -1197,6 +1199,178 @@ def add_keyword(request, request_id: str | None) -> dict:
         rule_checks=rule_checks,
         changes=changes,
         data=mutation_result,
+        requires_confirmation=False,
+        executed=True,
+    )
+
+
+_CONVERSION_STATUSES = {"ENABLED", "HIDDEN"}
+
+
+def _conversion_request_error(message: str) -> AdsMcpError:
+    return AdsMcpError(
+        status_code=400,
+        error_code="REQUEST_INVALID",
+        message=message,
+        tool="update_conversion_action",
+    )
+
+
+def update_conversion_action(request, request_id: str | None) -> dict:
+    tool = "update_conversion_action"
+    payload = request.payload or {}
+    conversion_name = payload.get("conversionName")
+    if not conversion_name:
+        raise _conversion_request_error("conversionName is required.")
+
+    status = payload.get("status")
+    primary_for_goal = payload.get("primaryForGoal")
+    default_value = payload.get("defaultValue")
+    call_duration = payload.get("phoneCallDurationSeconds")
+
+    if all(v is None for v in (status, primary_for_goal, default_value, call_duration)):
+        raise _conversion_request_error(
+            "Provide at least one of status, primaryForGoal, defaultValue, phoneCallDurationSeconds."
+        )
+    if status is not None:
+        status = str(status).upper()
+        if status not in _CONVERSION_STATUSES:
+            raise _conversion_request_error("status must be 'ENABLED' or 'HIDDEN'.")
+    if default_value is not None:
+        try:
+            default_value = float(default_value)
+        except (TypeError, ValueError):
+            raise _conversion_request_error("defaultValue must be a number.") from None
+        if default_value < 0:
+            raise _conversion_request_error("defaultValue cannot be negative.")
+    if call_duration is not None:
+        try:
+            call_duration = int(call_duration)
+        except (TypeError, ValueError):
+            raise _conversion_request_error("phoneCallDurationSeconds must be a whole number.") from None
+        if call_duration < 0:
+            raise _conversion_request_error("phoneCallDurationSeconds cannot be negative.")
+
+    rule_checks = evaluate_google_ads_mutation_rules(
+        business_key=request.businessKey,
+        payload={},
+        change_type="conversion_action",
+    )
+
+    config = load_google_ads_sdk_config(business_key=request.businessKey, tool=tool)
+    snapshot = get_conversion_action_snapshot(config, conversion_name=conversion_name, tool=tool)
+
+    if call_duration is not None and snapshot["type"] != "AD_CALL":
+        raise _conversion_request_error(
+            f"phoneCallDurationSeconds only applies to call conversions (AD_CALL); "
+            f"'{conversion_name}' is {snapshot['type']}."
+        )
+
+    # (mask path, label, before, after)
+    candidates: list[tuple[str, str, object, object]] = []
+    if status is not None:
+        candidates.append(("status", "Status", snapshot["status"], status))
+    if primary_for_goal is not None:
+        candidates.append(("primary_for_goal", "Primary goal", snapshot["primaryForGoal"], bool(primary_for_goal)))
+    if default_value is not None:
+        candidates.append(("value_settings.default_value", "Default value", snapshot["defaultValue"], default_value))
+        # GA4 events carry no value, so always apply the default.
+        candidates.append((
+            "value_settings.always_use_default_value", "Always use default value",
+            snapshot["alwaysUseDefaultValue"], True,
+        ))
+    if call_duration is not None:
+        candidates.append((
+            "phone_call_duration_seconds", "Minimum call length (seconds)",
+            snapshot["phoneCallDurationSeconds"], call_duration,
+        ))
+
+    pending = [c for c in candidates if c[2] != c[3]]
+    is_dry_run = request.dryRun is not False
+    data = {"conversionId": snapshot["conversionId"], "type": snapshot["type"], "resourceName": snapshot["resourceName"]}
+
+    if not pending:
+        return build_success_response(
+            service=SERVICE_NAME,
+            tool=tool,
+            mode="dry-run" if is_dry_run else "execute",
+            business_key=request.businessKey,
+            request_id=request_id,
+            summary=f"No change: {conversion_name} already matches.",
+            rule_checks=rule_checks,
+            changes=[],
+            data=data,
+            requires_confirmation=False,
+            executed=False,
+        )
+
+    changes = [
+        build_change(
+            field=f"conversion_action.{path}",
+            label=label,
+            before=before,
+            after=after,
+            status="proposed",
+            resource_type="conversion_action",
+            resource_id=snapshot["conversionId"],
+        )
+        for path, label, before, after in pending
+    ]
+
+    if is_dry_run:
+        return build_success_response(
+            service=SERVICE_NAME,
+            tool=tool,
+            mode="dry-run",
+            business_key=request.businessKey,
+            request_id=request_id,
+            summary=f"Would update {len(changes)} setting(s) on {conversion_name}.",
+            rule_checks=rule_checks,
+            changes=changes,
+            data=data,
+            requires_confirmation=True,
+            executed=False,
+        )
+
+    if not request.approvalId:
+        raise AdsMcpError(
+            status_code=400,
+            error_code="BUSINESS_RULE_BLOCKED",
+            message="approvalId is required for execute requests.",
+            retryable=False,
+            rule_checks=rule_checks,
+            tool=tool,
+        )
+
+    if any(not check["passed"] for check in rule_checks):
+        raise AdsMcpError(
+            status_code=400,
+            error_code="BUSINESS_RULE_BLOCKED",
+            message="Execution blocked by business rules.",
+            retryable=False,
+            rule_checks=rule_checks,
+            tool=tool,
+        )
+
+    mutation_result = mutate_conversion_action(
+        config,
+        resource_name=snapshot["resourceName"],
+        updates={path: after for path, _, _, after in pending},
+        tool=tool,
+    )
+
+    for change in changes:
+        change["status"] = "applied"
+    return build_success_response(
+        service=SERVICE_NAME,
+        tool=tool,
+        mode="execute",
+        business_key=request.businessKey,
+        request_id=request_id,
+        summary=f"Updated {len(changes)} setting(s) on {conversion_name}.",
+        rule_checks=rule_checks,
+        changes=changes,
+        data={**data, **mutation_result},
         requires_confirmation=False,
         executed=True,
     )
