@@ -63,6 +63,18 @@ def _upstream_error(exc: Exception, *, tool: str, action: str) -> AdsMcpError:
             tool=tool,
             details={"reason": str(exc)},
         )
+    if isinstance(exc, google_exceptions.PermissionDenied):
+        return AdsMcpError(
+            status_code=403,
+            error_code="UPSTREAM_PERMISSION_DENIED",
+            message=(
+                f"GA4 Admin {action} was denied: the API may be disabled in the Google Cloud "
+                "project or the account may lack Editor access on the property."
+            ),
+            retryable=False,
+            tool=tool,
+            details={"reason": str(exc)},
+        )
     return AdsMcpError(
         status_code=502,
         error_code="UPSTREAM_ERROR",

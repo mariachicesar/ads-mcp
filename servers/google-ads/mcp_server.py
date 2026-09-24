@@ -511,7 +511,7 @@ def google_ads_add_keyword(
 @mcp.tool()
 def google_ads_update_conversion_action(
     business_key: Annotated[str, Field(description="Business key for any onboarded client, e.g. 'rnr-electrician', 'gq-painting', 'el-cuis' — not limited to these examples.")],
-    conversion_name: Annotated[str, Field(description="Exact conversion action name as shown in Google Ads, e.g. 'Calls from ads' or an imported GA4 event like 'booking_confirmed'")],
+    conversion_name: Annotated[str, Field(description="Exact conversion action name as shown in Google Ads, e.g. 'Calls from ads'. Imported GA4 conversions are usually named like \"<property> (web) booking_confirmed\" — copy the exact name from google_ads_get_conversion_actions.")],
     status: Annotated[str | None, Field(description="'ENABLED' (e.g. to turn on a HIDDEN imported GA4 conversion) or 'HIDDEN'")] = None,
     primary_for_goal: Annotated[bool | None, Field(description="True = Primary (used for bidding), False = Secondary (reporting only)")] = None,
     default_value: Annotated[float | None, Field(description="Conversion value in account currency. Also turns on 'always use default value'.", ge=0)] = None,

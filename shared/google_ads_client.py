@@ -1048,7 +1048,7 @@ def get_conversion_action_snapshot(
         raise AdsMcpError(
             status_code=404,
             error_code="REQUEST_INVALID",
-            message=f"Conversion action '{conversion_name}' was not found in Google Ads.",
+            message=f"Conversion action '{conversion_name}' was not found in Google Ads. Use google_ads_get_conversion_actions to list exact names.",
             tool=tool,
             details={"conversionName": conversion_name},
         )

@@ -266,6 +266,7 @@ def test_call_duration_on_ad_call(patched):
     ({"defaultValue": -1}, "defaultValue"),
     ({"defaultValue": "abc"}, "defaultValue"),
     ({"phoneCallDurationSeconds": -5}, "phoneCallDurationSeconds"),
+    ({"primaryForGoal": "false"}, "primaryForGoal"),
 ])
 def test_invalid_inputs(patched, payload, fragment):
     with pytest.raises(AdsMcpError) as exc:

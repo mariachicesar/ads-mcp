@@ -144,6 +144,19 @@ def test_other_upstream_errors_map_to_upstream_error(admin):
     assert exc.value.retryable is True
 
 
+def test_non_scope_permission_denied_is_not_retryable(admin):
+    admin.fail_with = google_exceptions.PermissionDenied(
+        "Google Analytics Admin API has not been used in project 1 before or it is disabled. SERVICE_DISABLED"
+    )
+
+    with pytest.raises(AdsMcpError) as exc:
+        write.create_key_event(_ke_request(dry_run=False, approval_id="ok"), None)
+
+    assert exc.value.status_code == 403
+    assert exc.value.error_code == "UPSTREAM_PERMISSION_DENIED"
+    assert exc.value.retryable is False
+
+
 @pytest.fixture
 def ads_config(monkeypatch):
     monkeypatch.setattr(write, "load_google_ads_config", lambda **kw: {"customer_account_id": "294-342-5139"})

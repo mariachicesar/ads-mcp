@@ -1252,6 +1252,8 @@ def update_conversion_action(request, request_id: str | None) -> dict:
             raise _conversion_request_error("phoneCallDurationSeconds must be a whole number.") from None
         if call_duration < 0:
             raise _conversion_request_error("phoneCallDurationSeconds cannot be negative.")
+    if primary_for_goal is not None and not isinstance(primary_for_goal, bool):
+        raise _conversion_request_error("primaryForGoal must be true or false.")
 
     rule_checks = evaluate_google_ads_mutation_rules(
         business_key=request.businessKey,

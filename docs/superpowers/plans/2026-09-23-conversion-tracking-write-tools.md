@@ -2534,8 +2534,15 @@ execute with the dry-run's `approvalId`.
 1. **Deploy the site.** The user pushes and deploys `mariachi-cuis`. After the deploy, open the
    live site in a browser **without** `?internal=1` set. GA4 filters internal traffic, so a
    flagged browser's events are dropped. Tap Phone and WhatsApp, then confirm `phone_click` and
-   `whatsapp_click` in GA4 Realtime.
+   `whatsapp_click` in GA4 Realtime. Also open GTM Preview (or Meta Pixel Helper) on `/book/success`
+   and `/contact/success` and confirm each Meta tag (Purchase on `booking_confirmed`, Lead on
+   `contact_form_submit`/`estimate_sent`) fires exactly once; the site now also sends these names
+   via `gtag()` onto the shared dataLayer, which GTM may treat as a second custom event. If a tag
+   fires twice, add a GTM trigger condition excluding gtag-originated events before trusting Meta
+   numbers.
 2. **New token.**
+   - Prerequisite: Enable the Google Analytics Admin API (`analyticsadmin.googleapis.com`) in GCP
+     project 826428110016 — it is currently disabled.
    - The user runs `GOOGLE_CLIENT_ID=… GOOGLE_CLIENT_SECRET=… python scripts/get-refresh-token.py`
      and signs in with the account that has GA4 Editor on property 554624356.
    - The user stores the printed refresh token in El Cuis's analytics secret. Give them the exact
@@ -2545,7 +2552,8 @@ execute with the dry-run's `approvalId`.
      `analytics.edit`.
 3. **Register and restart.** `claude mcp add analytics …`, if it isn't registered yet, using the
    same `.venv` Python and `servers/analytics/mcp_server.py`. Restart Claude Code.
-4. **Auto-tagging:** `google_ads_set_auto_tagging('el-cuis', True)`.
+4. **Auto-tagging:** `google_ads_set_auto_tagging('el-cuis', True)`. (El Cuis auto-tagging is
+   already on — expect "No change".)
 5. **Link:** `analytics_link_google_ads('el-cuis')`.
 6. **Key events:** `analytics_create_key_event` for `booking_confirmed`, `estimate_sent`,
    `contact_form_submit`, `whatsapp_click` and `phone_click` (all `ONCE_PER_SESSION`).
