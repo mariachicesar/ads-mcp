@@ -1,5 +1,5 @@
 """
-Get a Google OAuth refresh token for Google Ads / GA4 / Search Console.
+Get a Google OAuth refresh token for Google Ads / GA4 (read + admin edit) / Search Console / GBP.
 
 Usage:
     CLIENT_ID=your_client_id CLIENT_SECRET=your_client_secret python scripts/get-refresh-token.py
@@ -31,6 +31,7 @@ flow = InstalledAppFlow.from_client_config(
     scopes=[
         "https://www.googleapis.com/auth/adwords",
         "https://www.googleapis.com/auth/analytics.readonly",
+        "https://www.googleapis.com/auth/analytics.edit",
         "https://www.googleapis.com/auth/webmasters.readonly",
         "https://www.googleapis.com/auth/business.manage",
         "openid",
