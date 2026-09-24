@@ -117,12 +117,13 @@ def apply_onboarding(
     settings = get_settings()
     secrets_written: list[str] = []
     for pi in platform_inputs:
-        if not pi.enabled or not pi.credentials:
+        credentials = {key: value for key, value in pi.credentials.items() if value}
+        if not pi.enabled or not credentials:
             continue
         sid = credential_secret_id(manifest.businessKey, pi.platform)
         existing_secret = secrets_mod.get_secret(sid, settings) if not dry_run else None
         merged = dict(existing_secret) if isinstance(existing_secret, dict) else {}
-        merged.update({k: v for k, v in pi.credentials.items() if v})
+        merged.update(credentials)
         merged.update({k: v for k, v in pi.metadata.items() if v})
         if not dry_run:
             secrets_mod.put_secret(sid, merged, settings)

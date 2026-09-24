@@ -27,6 +27,7 @@ from shared.errors import AdsMcpError  # noqa: E402
 from shared.models import ClientManifest  # noqa: E402
 
 PLATFORMS = core.KNOWN_PLATFORMS if hasattr(core, "KNOWN_PLATFORMS") else manifest_mod.KNOWN_PLATFORMS
+SECRET_CREDENTIAL_KEYS = {"client_secret", "refresh_token", "access_token", "app_secret"}
 
 
 def _prompt(label: str, *, secret: bool = False, default: str = "") -> str:
@@ -52,7 +53,9 @@ def _collect_interactive(existing: ClientManifest | None) -> list[core.PlatformI
             metadata[key] = _prompt(f"  {platform}.{key}")
         credentials = {}
         for key in core.CREDENTIAL_KEYS_BY_PLATFORM.get(platform, ()):
-            credentials[key] = _prompt(f"  {platform}.{key}", secret=True)
+            credentials[key] = _prompt(
+                f"  {platform}.{key}", secret=key in SECRET_CREDENTIAL_KEYS
+            )
         inputs.append(core.PlatformInput(platform, True, metadata, credentials))
     return inputs
 
@@ -140,7 +143,9 @@ def _toggle(args, *, enabled: bool) -> int:
         for key in core.METADATA_KEYS_BY_PLATFORM.get(args.platform, ()):
             metadata[key] = _prompt(f"{args.platform}.{key}")
         for key in core.CREDENTIAL_KEYS_BY_PLATFORM.get(args.platform, ()):
-            credentials[key] = _prompt(f"{args.platform}.{key}", secret=True)
+            credentials[key] = _prompt(
+                f"{args.platform}.{key}", secret=key in SECRET_CREDENTIAL_KEYS
+            )
     try:
         manifest_mod.set_platform_config(
             args.key, args.platform, enabled=enabled, metadata=metadata, dry_run=args.dry_run

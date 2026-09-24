@@ -8,10 +8,18 @@ if str(ROOT) not in sys.path:
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from tools.read import (
+    get_ad_performance,
+    get_adset_performance,
+    get_audience_performance,
+    get_campaign_performance,
+    get_publisher_platform_breakdown,
+    list_ad_accounts,
+    list_creative_assets,
+)
 from shared.auth import SignedRequestMiddleware
 from shared.errors import AdsMcpError
 from shared.models import ToolRequest
-from shared.responses import build_success_response
 
 app = FastAPI(title="Meta Ads MCP", version="0.1.0")
 app.add_middleware(SignedRequestMiddleware, service_name="meta-ads")
@@ -47,18 +55,43 @@ def health() -> dict:
     return {"ok": True, "service": "meta-ads", "phase": "foundation"}
 
 
+def _request_id(request: Request) -> str | None:
+    return getattr(request.state, "request_id", None)
+
+
+@app.post("/tools/list_ad_accounts")
+def tool_list_ad_accounts(request: ToolRequest, http_request: Request) -> dict:
+    return list_ad_accounts(request, _request_id(http_request))
+
+
 @app.post("/tools/get_campaign_performance")
-def get_campaign_performance(request: ToolRequest, http_request: Request) -> dict:
-    return build_success_response(
-        service="meta-ads",
-        tool="get_campaign_performance",
-        mode="read",
-        business_key=request.businessKey,
-        request_id=getattr(http_request.state, "request_id", None),
-        summary="Placeholder Meta Ads performance response.",
-        data={"rows": [], "payload": request.payload},
-        freshness={"state": "live"},
-    )
+def tool_get_campaign_performance(request: ToolRequest, http_request: Request) -> dict:
+    return get_campaign_performance(request, _request_id(http_request))
+
+
+@app.post("/tools/get_adset_performance")
+def tool_get_adset_performance(request: ToolRequest, http_request: Request) -> dict:
+    return get_adset_performance(request, _request_id(http_request))
+
+
+@app.post("/tools/get_ad_performance")
+def tool_get_ad_performance(request: ToolRequest, http_request: Request) -> dict:
+    return get_ad_performance(request, _request_id(http_request))
+
+
+@app.post("/tools/get_publisher_platform_breakdown")
+def tool_get_publisher_platform_breakdown(request: ToolRequest, http_request: Request) -> dict:
+    return get_publisher_platform_breakdown(request, _request_id(http_request))
+
+
+@app.post("/tools/get_audience_performance")
+def tool_get_audience_performance(request: ToolRequest, http_request: Request) -> dict:
+    return get_audience_performance(request, _request_id(http_request))
+
+
+@app.post("/tools/list_creative_assets")
+def tool_list_creative_assets(request: ToolRequest, http_request: Request) -> dict:
+    return list_creative_assets(request, _request_id(http_request))
 
 
 if __name__ == "__main__":

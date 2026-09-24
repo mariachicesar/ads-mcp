@@ -146,3 +146,12 @@ def load_google_ads_sdk_config(*, business_key: str, tool: str | None = None) ->
         ),
         tool=tool,
     )
+
+
+def load_meta_ads_config(*, business_key: str, tool: str | None = None) -> dict[str, Any]:
+    return load_platform_runtime_config(
+        platform="meta-ads",
+        business_key=business_key,
+        required_keys=("ad_account_id", "access_token", "app_id", "app_secret", "page_id"),
+        tool=tool,
+    )

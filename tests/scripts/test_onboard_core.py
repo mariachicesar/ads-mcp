@@ -55,6 +55,17 @@ def test_apply_onboarding_dry_run_writes_nothing(clients_dir, fake_secrets):
     assert fake_secrets.store == {}
 
 
+def test_apply_onboarding_skips_empty_credentials(clients_dir, fake_secrets):
+    inputs = [core.PlatformInput("meta-ads", True, {"ad_account_id": ""}, {
+        "access_token": "", "app_id": "", "app_secret": "", "page_id": "",
+    })]
+    manifest = core.build_manifest("acme", "Acme", platform_inputs=inputs)
+    result = core.apply_onboarding(manifest, inputs)
+
+    assert result["secretsWritten"] == []
+    assert manifest_mod.credential_secret_id("acme", "meta-ads") not in fake_secrets.store
+
+
 def test_build_manifest_preserves_existing_created_at(clients_dir, fake_secrets):
     from shared.models import ClientManifest
     existing = ClientManifest(businessKey="acme", displayName="Old", createdAt="2020-01-01T00:00:00Z", platforms={})
