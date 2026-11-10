@@ -185,9 +185,10 @@ def meta_ads_create_adset(
     campaign_id: Annotated[str, Field(description="Parent campaign ID")],
     name: Annotated[str, Field(description="Ad set name")],
     optimization_goal: Annotated[str, Field(description="e.g. CONVERSATIONS, LINK_CLICKS, LEAD_GENERATION, REACH")],
-    latitude: Annotated[float, Field(description="Center latitude for radius targeting")],
-    longitude: Annotated[float, Field(description="Center longitude for radius targeting")],
-    radius_miles: Annotated[float, Field(description="Radius in miles (1-50)")],
+    latitude: Annotated[float | None, Field(description="Center latitude for radius targeting; required unless clone_targeting_from_adset_id is set")] = None,
+    longitude: Annotated[float | None, Field(description="Center longitude for radius targeting; required unless clone_targeting_from_adset_id is set")] = None,
+    radius_miles: Annotated[float | None, Field(description="Radius in miles (1-50); required unless clone_targeting_from_adset_id is set")] = None,
+    clone_targeting_from_adset_id: Annotated[str | None, Field(description="Copy the full targeting (geo, ages, locales, placements, Advantage+ settings) verbatim from this existing ad set; geo/age/advantage_audience arguments are then ignored")] = None,
     daily_budget_usd: Annotated[float | None, Field(description="Ad set daily budget in USD; omit when the campaign uses CBO")] = None,
     lifetime_budget_usd: Annotated[float | None, Field(description="Ad set lifetime budget in USD; requires end_time")] = None,
     destination_type: Annotated[str | None, Field(description="e.g. MESSENGER, WHATSAPP, INSTAGRAM_DIRECT, WEBSITE")] = None,
@@ -202,7 +203,7 @@ def meta_ads_create_adset(
     status: _CREATE_STATUS = "PAUSED",
     approval_id: _APPROVAL = None,
 ) -> dict:
-    """Create a Meta ad set with radius + age targeting (PAUSED by default).
+    """Create a Meta ad set with radius + age targeting, or targeting cloned from an existing ad set (PAUSED by default).
 
     IMPORTANT: Call without approval_id first and show the dry-run preview.
     Only call again with approval_id after the user explicitly approves.
@@ -214,7 +215,7 @@ def meta_ads_create_adset(
         "destinationType": destination_type, "ageMin": age_min, "ageMax": age_max,
         "pageId": page_id, "billingEvent": billing_event, "bidStrategy": bid_strategy,
         "startTime": start_time, "endTime": end_time, "advantageAudience": advantage_audience,
-        "status": status,
+        "cloneTargetingFromAdsetId": clone_targeting_from_adset_id, "status": status,
     })
     return _run_tool("create_adset", lambda: create_adset(request, None))
 

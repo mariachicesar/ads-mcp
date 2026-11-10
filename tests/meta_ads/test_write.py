@@ -160,6 +160,60 @@ def test_create_adset_builds_radius_targeting(graph):
     }
 
 
+SOURCE_TARGETING = {
+    "age_min": 25, "age_max": 65,
+    "geo_locations": {"cities": [{"key": "2420379", "radius": 30, "distance_unit": "mile"}],
+                      "location_types": ["frequently_in", "home", "recent"]},
+    "locales": [6, 7, 23],
+    "targeting_automation": {"advantage_audience": 1, "individual_setting": {"geo": 0}},
+    "publisher_platforms": ["facebook", "instagram"],
+    "facebook_positions": ["feed", "story", "facebook_reels", "profile_feed"],
+    "instagram_positions": ["story", "reels"],
+}
+
+
+@pytest.fixture
+def source_adset(monkeypatch):
+    sources = {"as1": {"id": "as1", "name": "Vieja Chillona Ad", "account_id": "123", "targeting": SOURCE_TARGETING}}
+    monkeypatch.setattr(write, "get_adset_targeting", lambda config, *, adset_id, tool: dict(sources[adset_id]))
+    return sources
+
+
+def test_create_adset_clones_targeting_verbatim_from_source_adset(graph, source_adset):
+    graph["objects"]["c2"] = {**CAMPAIGN, "id": "c2", "daily_budget": None}
+    response = write.create_adset(_req({
+        "campaignId": "c2", "name": "MEC | Creative Test", "optimizationGoal": "CONVERSATIONS",
+        "destinationType": "MESSENGER", "cloneTargetingFromAdsetId": "as1", "dailyBudgetUsd": 15,
+        "ageMin": 18, "ageMax": 65, "advantageAudience": 0,
+    }), None)
+    fields = response["data"]["graphRequest"]["fields"]
+
+    assert response["approvalId"]
+    assert fields["targeting"] == SOURCE_TARGETING
+    assert response["data"]["targetingSource"] == {"adsetId": "as1", "name": "Vieja Chillona Ad"}
+    assert any(c["rule"] == "targeting-source-ownership" and c["passed"] for c in response["ruleChecks"])
+
+
+def test_create_adset_clone_from_other_account_is_blocked(graph, source_adset):
+    source_adset["as9"] = {"id": "as9", "name": "x", "account_id": "777", "targeting": SOURCE_TARGETING}
+    graph["objects"]["c2"] = {**CAMPAIGN, "id": "c2", "daily_budget": None}
+    response = write.create_adset(_req({
+        "campaignId": "c2", "name": "x", "optimizationGoal": "CONVERSATIONS",
+        "cloneTargetingFromAdsetId": "as9", "dailyBudgetUsd": 15,
+    }), None)
+
+    assert "approvalId" not in response
+    assert any(c["rule"] == "targeting-source-ownership" and not c["passed"] for c in response["ruleChecks"])
+
+
+def test_create_adset_requires_geo_when_not_cloning(graph):
+    graph["objects"]["c2"] = {**CAMPAIGN, "id": "c2", "daily_budget": None}
+    with pytest.raises(AdsMcpError):
+        write.create_adset(_req({
+            "campaignId": "c2", "name": "x", "optimizationGoal": "CONVERSATIONS", "dailyBudgetUsd": 15,
+        }), None)
+
+
 def test_create_adset_blocks_budget_under_cbo_campaign(graph):
     response = write.create_adset(_req({
         "campaignId": "c1", "name": "x", "optimizationGoal": "CONVERSATIONS",

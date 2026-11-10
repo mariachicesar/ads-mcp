@@ -302,6 +302,11 @@ def get_account_snapshot(config: dict[str, Any], *, tool: str | None = None) -> 
     return _graph_request(config, "GET", account_id, params={"fields": "id,name,currency,account_status"}, tool=tool)
 
 
+def get_adset_targeting(config: dict[str, Any], *, adset_id: str, tool: str | None = None) -> dict[str, Any]:
+    """Return an ad set's id, name, account_id and full targeting spec."""
+    return _graph_request(config, "GET", adset_id, params={"fields": "id,name,account_id,targeting"}, tool=tool)
+
+
 def update_object(config: dict[str, Any], *, object_id: str, fields: dict[str, Any], tool: str | None = None) -> dict[str, Any]:
     return _graph_request(config, "POST", object_id, data=fields, tool=tool)
 

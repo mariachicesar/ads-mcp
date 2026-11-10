@@ -15,6 +15,7 @@ from shared.meta_ads_client import (
     configured_account_id,
     create_account_object,
     get_account_snapshot,
+    get_adset_targeting,
     get_object_snapshot,
     update_object,
 )
@@ -287,29 +288,40 @@ def create_adset(request: ToolRequest, request_id: str | None) -> dict:
     if budget and budget[0] == "lifetime_budget" and not payload.get("endTime"):
         raise _invalid("endTime is required with lifetimeBudgetUsd.", tool)
 
-    try:
-        latitude, longitude = float(_required(payload, "latitude", tool)), float(_required(payload, "longitude", tool))
-        radius = float(_required(payload, "radiusMiles", tool))
-        age_min, age_max = int(payload.get("ageMin") or 18), int(payload.get("ageMax") or 65)
-    except (TypeError, ValueError) as exc:
-        raise _invalid("latitude, longitude, radiusMiles, ageMin and ageMax must be numbers.", tool) from exc
-    if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
-        raise _invalid("latitude/longitude are out of range.", tool)
-    if not 1 <= radius <= 50:
-        raise _invalid("radiusMiles must be between 1 and 50.", tool)
-    if not 18 <= age_min <= age_max <= 65:
-        raise _invalid("Ages must satisfy 18 <= ageMin <= ageMax <= 65.", tool)
-
     config = load_meta_ads_config(business_key=request.businessKey, tool=tool)
     page_id = str(payload.get("pageId") or config.get("page_id"))
-    targeting = {
-        "geo_locations": {
-            "custom_locations": [{"latitude": latitude, "longitude": longitude, "radius": radius, "distance_unit": "mile"}],
-        },
-        "age_min": age_min,
-        "age_max": age_max,
-        "targeting_automation": {"advantage_audience": int(payload.get("advantageAudience") or 0)},
-    }
+    clone_from = str(payload.get("cloneTargetingFromAdsetId") or "").strip()
+    source: dict[str, Any] | None = None
+    if clone_from:
+        # Copy the source ad set's targeting verbatim (geo, ages, locales,
+        # placements, Advantage+ settings); geo/age arguments are ignored.
+        source = get_adset_targeting(config, adset_id=clone_from, tool=tool)
+        if not isinstance(source.get("targeting"), dict) or not source["targeting"]:
+            raise _invalid(f"Ad set {clone_from} has no targeting to clone.", tool)
+        targeting = source["targeting"]
+        targeting_summary = f"targeting cloned from ad set '{source.get('name')}' ({clone_from})"
+    else:
+        try:
+            latitude, longitude = float(_required(payload, "latitude", tool)), float(_required(payload, "longitude", tool))
+            radius = float(_required(payload, "radiusMiles", tool))
+            age_min, age_max = int(payload.get("ageMin") or 18), int(payload.get("ageMax") or 65)
+        except (TypeError, ValueError) as exc:
+            raise _invalid("latitude, longitude, radiusMiles, ageMin and ageMax must be numbers.", tool) from exc
+        if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+            raise _invalid("latitude/longitude are out of range.", tool)
+        if not 1 <= radius <= 50:
+            raise _invalid("radiusMiles must be between 1 and 50.", tool)
+        if not 18 <= age_min <= age_max <= 65:
+            raise _invalid("Ages must satisfy 18 <= ageMin <= ageMax <= 65.", tool)
+        targeting = {
+            "geo_locations": {
+                "custom_locations": [{"latitude": latitude, "longitude": longitude, "radius": radius, "distance_unit": "mile"}],
+            },
+            "age_min": age_min,
+            "age_max": age_max,
+            "targeting_automation": {"advantage_audience": int(payload.get("advantageAudience") or 0)},
+        }
+        targeting_summary = f"{radius:g} mi around ({latitude}, {longitude}), ages {age_min}-{age_max}"
     fields: dict[str, Any] = {
         "name": name, "campaign_id": campaign_id, "status": status,
         "optimization_goal": optimization_goal,
@@ -330,6 +342,14 @@ def create_adset(request: ToolRequest, request_id: str | None) -> dict:
         raise _invalid(f"{campaign_id} is a {campaign['objectType']}, not a campaign.", tool)
     account_id = configured_account_id(config, tool=tool)
     rule_checks = [_ownership_check(config, campaign, tool), _created_paused_check(status)]
+    if source is not None:
+        expected = account_id.removeprefix("act_")
+        owned = str(source.get("account_id") or "") == expected
+        rule_checks.append(build_rule_check(
+            rule="targeting-source-ownership", passed=owned, severity="info" if owned else "blocking",
+            message=(f"Targeting source ad set {clone_from} belongs to act_{expected}." if owned
+                     else f"Targeting source ad set {clone_from} belongs to act_{source.get('account_id') or '?'}, not act_{expected}."),
+        ))
     has_cbo = bool(_cents_to_usd(campaign.get("daily_budget")) or _cents_to_usd(campaign.get("lifetime_budget")))
     if has_cbo and budget:
         rule_checks.append(build_rule_check(rule="budget-level", passed=False, severity="blocking", message=f"Campaign '{campaign.get('name')}' uses a campaign budget (CBO); omit the ad set budget."))
@@ -343,11 +363,15 @@ def create_adset(request: ToolRequest, request_id: str | None) -> dict:
     changes = [build_change(field="adset", label="New ad set", before=None, after=fields, resource_type="adset")]
     return _write_flow(
         request, request_id, tool=tool, rule_checks=rule_checks, changes=changes,
-        preview={"campaign": campaign, "graphRequest": {"method": "POST", "path": f"{account_id}/adsets", "fields": fields}},
+        preview={
+            "campaign": campaign,
+            **({"targetingSource": {"adsetId": clone_from, "name": source.get("name")}} if source is not None else {}),
+            "graphRequest": {"method": "POST", "path": f"{account_id}/adsets", "fields": fields},
+        },
         dry_summary=(
             f"Would create {status} ad set '{name}' in campaign '{campaign.get('name')}': {optimization_goal}"
             f"{' → ' + fields['destination_type'] if 'destination_type' in fields else ''}, "
-            f"{radius:g} mi around ({latitude}, {longitude}), ages {age_min}-{age_max}"
+            f"{targeting_summary}"
             + (f", {budget[0].replace('_', ' ')} ${budget[1] / 100:.2f}." if budget else ".")
         ),
         done_summary=f"Created {status} ad set '{name}'.",
