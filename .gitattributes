@@ -1,0 +1,3 @@
+# Files deployed to Linux (EC2) must keep LF line endings.
+infrastructure/** text eol=lf
+*.sh text eol=lf
