@@ -107,3 +107,73 @@ def test_video_source_rejects_wrong_extension_and_oversize(tmp_path, monkeypatch
     monkeypatch.setattr(publish, "MAX_VIDEO_BYTES", 2)
     with pytest.raises(AdsMcpError):
         publish._video_source({"filePath": str(_video(tmp_path, "b.mp4"))}, "t")
+
+
+# ── scheduling helpers + schedule_page_video ─────────────────────────────────
+
+from datetime import datetime, timezone  # noqa: E402
+
+NOW = datetime(2026, 11, 10, 16, 0, tzinfo=timezone.utc)  # 08:00 PST
+NOON_NOV12_PT = 1794513600  # 2026-11-12T12:00:00-08:00
+
+
+@pytest.fixture
+def fixed_now(monkeypatch):
+    monkeypatch.setattr(publish, "_now", lambda: NOW)
+
+
+def _sched(tmp_path, **extra):
+    return {"filePath": str(_video(tmp_path)), "scheduledTime": "2026-11-12T12:00:00",
+            "description": "Mariachi El Cuis 🎺", **extra}
+
+
+def test_parse_schedule_time_naive_is_pacific_after_dst():
+    assert publish._parse_schedule_time("2026-11-01T09:00:00", "t") == datetime(2026, 11, 1, 17, 0, tzinfo=timezone.utc)
+
+
+def test_parse_schedule_time_keeps_explicit_offset():
+    assert publish._parse_schedule_time("2026-11-12T12:00:00-08:00", "t").hour == 20
+
+
+def test_parse_schedule_time_rejects_garbage():
+    with pytest.raises(AdsMcpError):
+        publish._parse_schedule_time("next tuesday", "t")
+
+
+def test_schedule_page_video_dry_run_fields(publish_env, fixed_now, tmp_path):
+    r = publish.schedule_page_video(_req(_sched(tmp_path, title="Serenata")), None)
+    fields = r["data"]["graphRequest"]["fields"]
+
+    assert r["approvalId"]
+    assert r["data"]["graphRequest"]["path"] == "999/videos"
+    assert fields["scheduled_publish_time"] == NOON_NOV12_PT
+    assert fields["published"] is False
+    assert fields["title"] == "Serenata" and fields["description"] == "Mariachi El Cuis 🎺"
+    assert publish_env["calls"] == [] and publish_env["posts"] == []
+
+
+@pytest.mark.parametrize("when", ["2026-11-10T08:05:00", "2026-11-09T12:00:00", "2027-02-01T12:00:00"])
+def test_schedule_page_video_blocks_out_of_window_times(publish_env, fixed_now, tmp_path, when):
+    r = publish.schedule_page_video(_req(_sched(tmp_path, scheduledTime=when)), None)
+
+    assert "approvalId" not in r
+    assert any(c["rule"] == "schedule-window" and not c["passed"] for c in r["ruleChecks"])
+
+
+def test_schedule_page_video_blocks_other_page(publish_env, fixed_now, tmp_path):
+    r = publish.schedule_page_video(_req(_sched(tmp_path, pageId="555")), None)
+
+    assert "approvalId" not in r
+    assert any(c["rule"] == "page-is-configured" and not c["passed"] for c in r["ruleChecks"])
+
+
+def test_schedule_page_video_execute_uses_page_token(publish_env, fixed_now, tmp_path):
+    payload = _sched(tmp_path)
+    dry = publish.schedule_page_video(_req(payload), None)
+    done = publish.schedule_page_video(_req(payload, dry["approvalId"]), None)
+
+    assert done["executed"] is True
+    assert publish_env["calls"] == ["token:999"]
+    assert publish_env["tokens"] == ["page-tok"]
+    assert publish_env["posts"][0][0] == "999/videos"
+    assert done["data"]["result"] == {"videoId": "new-video"}

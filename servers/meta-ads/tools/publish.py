@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import hashlib
 import os
+from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from shared.meta_ads_client import configured_account_id, get_page_access_token, post_video
 from shared.models import ToolRequest
@@ -21,6 +23,49 @@ from tools.write import _invalid, _required, _write_flow
 
 MAX_VIDEO_BYTES = 1_073_741_824  # 1 GiB: Meta's non-resumable upload limit
 VIDEO_EXTENSIONS = {".mp4", ".mov"}
+# Naive schedule times are Pacific, matching scripts/run-scheduled-posts.py.
+SCHEDULE_TZ = ZoneInfo("America/Los_Angeles")
+MIN_LEAD = timedelta(minutes=10)
+MAX_LEAD = timedelta(days=75)
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _parse_schedule_time(value: str, tool: str) -> datetime:
+    """ISO 8601 → aware UTC datetime; a naive value is read as America/Los_Angeles."""
+    try:
+        when = datetime.fromisoformat(str(value).strip())
+    except ValueError as exc:
+        raise _invalid(f"scheduledTime '{value}' is not ISO 8601 (e.g. 2026-11-12T12:00:00).", tool) from exc
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=SCHEDULE_TZ)
+    return when.astimezone(timezone.utc)
+
+
+def _describe_time(when: datetime) -> str:
+    return f"{when.astimezone(SCHEDULE_TZ).strftime('%a %b %d %Y %I:%M %p %Z')} ({when.strftime('%Y-%m-%dT%H:%M')}Z)"
+
+
+def _schedule_window_check(when: datetime) -> dict[str, Any]:
+    now = _now()
+    ok = now + MIN_LEAD <= when <= now + MAX_LEAD
+    return build_rule_check(
+        rule="schedule-window", passed=ok, severity="info" if ok else "blocking",
+        message=(f"Publishes {_describe_time(when)}." if ok else
+                 f"{_describe_time(when)} must be between 10 minutes and 75 days from now."),
+    )
+
+
+def _page_check(config: dict[str, Any], page_id: str) -> dict[str, Any]:
+    expected = str(config.get("page_id"))
+    ok = page_id == expected
+    return build_rule_check(
+        rule="page-is-configured", passed=ok, severity="info" if ok else "blocking",
+        message=(f"Posts to the configured Page {expected}." if ok
+                 else f"Page {page_id} is not the configured Page {expected}."),
+    )
 
 
 def _sha256(path: str) -> str:
@@ -86,5 +131,41 @@ def upload_ad_video(request: ToolRequest, request_id: str | None) -> dict:
         preview={"file": file, "graphRequest": {"method": "POST", "path": path, "fields": fields}},
         dry_summary=f"Would upload video '{name}' to the {account_id} ad Media library.",
         done_summary=f"Uploaded video '{name}' to the {account_id} ad Media library.",
+        execute=execute, bound_args=_bound(request, sha),
+    )
+
+
+def schedule_page_video(request: ToolRequest, request_id: str | None) -> dict:
+    tool = "schedule_page_video"
+    payload = request.payload
+    description = _required(payload, "description", tool)
+    when = _parse_schedule_time(_required(payload, "scheduledTime", tool), tool)
+    source, sha = _video_source(payload, tool)
+
+    config = load_meta_ads_config(business_key=request.businessKey, tool=tool)
+    page_id = str(payload.get("pageId") or config.get("page_id"))
+    path = f"{page_id}/videos"
+    fields = {
+        "title": payload.get("title"), "description": description,
+        "published": False, "scheduled_publish_time": int(when.timestamp()),
+    }
+    fields = {k: v for k, v in fields.items() if v is not None}
+    file = _file_preview(source, sha)
+    rule_checks = [_page_check(config, page_id), _schedule_window_check(when)]
+    changes = [build_change(field="page_video", label="Scheduled Page video", before=None,
+                            after={**fields, "file": file}, resource_type="page_video")]
+
+    def execute() -> dict[str, Any]:
+        page_token = get_page_access_token(config, page_id=page_id, tool=tool)
+        result = post_video(config, path=path, fields=fields, file_path=source.get("filePath"),
+                            file_url=source.get("fileUrl"), access_token=page_token, tool=tool)
+        return {"videoId": result.get("id")}
+
+    return _write_flow(
+        request, request_id, tool=tool, rule_checks=rule_checks, changes=changes,
+        preview={"file": file, "scheduledFor": _describe_time(when),
+                 "graphRequest": {"method": "POST", "path": path, "fields": fields}},
+        dry_summary=f"Would schedule a video on Page {page_id} for {_describe_time(when)}.",
+        done_summary=f"Scheduled a video on Page {page_id} for {_describe_time(when)}.",
         execute=execute, bound_args=_bound(request, sha),
     )
