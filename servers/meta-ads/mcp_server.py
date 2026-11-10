@@ -32,7 +32,7 @@ from tools.read import (
     list_ad_accounts,
     list_creative_assets,
 )
-from tools.write import create_ad, create_adset, create_campaign, update_budget, update_status
+from tools.write import create_ad, create_adset, create_campaign, update_adset_schedule, update_budget, update_status
 
 mcp = FastMCP(
     name="meta-ads",
@@ -133,6 +133,25 @@ def meta_ads_update_status(
     """
     request = _write_request(business_key, approval_id, {"objectId": object_id, "status": status})
     return _run_tool("update_status", lambda: update_status(request, None))
+
+
+@mcp.tool()
+def meta_ads_update_adset_schedule(
+    business_key: _BK,
+    adset_id: Annotated[str, Field(description="Ad set ID to schedule")],
+    clone_schedule_from_adset_id: Annotated[str | None, Field(description="Copy the adset_schedule from this existing ad set")] = None,
+    schedule: Annotated[list[dict] | None, Field(description="Blocks of {days: [0-6, 0=Sunday], start_minute, end_minute (whole hours, minutes from midnight), timezone_type: USER|ADVERTISER}")] = None,
+    approval_id: _APPROVAL = None,
+) -> dict:
+    """Set when a Meta ad set delivers (dayparting / ad schedule).
+
+    IMPORTANT: Call without approval_id first and show the dry-run preview.
+    Only call again with approval_id after the user explicitly approves.
+    """
+    request = _write_request(business_key, approval_id, {
+        "adsetId": adset_id, "cloneScheduleFromAdsetId": clone_schedule_from_adset_id, "schedule": schedule,
+    })
+    return _run_tool("update_adset_schedule", lambda: update_adset_schedule(request, None))
 
 
 @mcp.tool()

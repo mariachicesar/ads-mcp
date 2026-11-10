@@ -17,7 +17,7 @@ from tools.read import (
     list_ad_accounts,
     list_creative_assets,
 )
-from tools.write import create_ad, create_adset, create_campaign, update_budget, update_status
+from tools.write import create_ad, create_adset, create_campaign, update_adset_schedule, update_budget, update_status
 from shared.auth import SignedRequestMiddleware
 from shared.errors import AdsMcpError
 from shared.models import ToolRequest
@@ -103,6 +103,11 @@ def tool_update_status(request: ToolRequest, http_request: Request) -> dict:
 @app.post("/tools/update_budget")
 def tool_update_budget(request: ToolRequest, http_request: Request) -> dict:
     return update_budget(request, _request_id(http_request))
+
+
+@app.post("/tools/update_adset_schedule")
+def tool_update_adset_schedule(request: ToolRequest, http_request: Request) -> dict:
+    return update_adset_schedule(request, _request_id(http_request))
 
 
 @app.post("/tools/create_campaign")

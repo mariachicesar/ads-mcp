@@ -307,6 +307,12 @@ def get_adset_targeting(config: dict[str, Any], *, adset_id: str, tool: str | No
     return _graph_request(config, "GET", adset_id, params={"fields": "id,name,account_id,targeting"}, tool=tool)
 
 
+def get_adset_schedule(config: dict[str, Any], *, adset_id: str, tool: str | None = None) -> dict[str, Any]:
+    """Return an ad set's id, name, account_id, budgets, pacing_type and adset_schedule."""
+    fields = "id,name,account_id,status,daily_budget,lifetime_budget,pacing_type,adset_schedule"
+    return _graph_request(config, "GET", adset_id, params={"fields": fields}, tool=tool)
+
+
 def update_object(config: dict[str, Any], *, object_id: str, fields: dict[str, Any], tool: str | None = None) -> dict[str, Any]:
     return _graph_request(config, "POST", object_id, data=fields, tool=tool)
 

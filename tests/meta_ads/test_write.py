@@ -301,3 +301,57 @@ def test_object_snapshot_detects_type_from_nonexisting_field_errors(monkeypatch)
     monkeypatch.setattr(meta_ads_client, "_graph_request", graph)
 
     assert meta_ads_client.get_object_snapshot(CONFIG, object_id="a1")["objectType"] == "ad"
+
+
+LIVE_SCHEDULE = [{"days": [1, 2, 3, 4, 5], "start_minute": 720, "end_minute": 1320, "timezone_type": "ADVERTISER"}]
+
+
+@pytest.fixture
+def schedules(monkeypatch):
+    adsets = {
+        "as1": {"id": "as1", "name": "Vieja Chillona Ad", "account_id": "123", "adset_schedule": LIVE_SCHEDULE, "pacing_type": ["day_parting"]},
+        "as2": {"id": "as2", "name": "MEC | Creative Test", "account_id": "123", "pacing_type": ["standard"], "daily_budget": "1500"},
+        "as9": {"id": "as9", "name": "other", "account_id": "777"},
+    }
+    monkeypatch.setattr(write, "get_adset_schedule", lambda config, *, adset_id, tool: dict(adsets[adset_id]))
+    return adsets
+
+
+def test_update_adset_schedule_clones_source_schedule(graph, schedules):
+    response = write.update_adset_schedule(_req({"adsetId": "as2", "cloneScheduleFromAdsetId": "as1"}), None)
+    fields = response["data"]["graphRequest"]["fields"]
+
+    assert response["approvalId"] and not graph["update"]
+    assert fields == {"adset_schedule": LIVE_SCHEDULE, "pacing_type": ["day_parting"]}
+    assert response["changes"][0]["before"] == {"adset_schedule": None, "pacing_type": ["standard"]}
+
+
+def test_update_adset_schedule_executes_with_approval(graph, schedules):
+    dry = write.update_adset_schedule(_req({"adsetId": "as2", "schedule": LIVE_SCHEDULE}), None)
+    done = write.update_adset_schedule(_req({"adsetId": "as2", "schedule": LIVE_SCHEDULE}, dry["approvalId"]), None)
+
+    assert done["executed"] is True
+    assert graph["update"] == [("as2", {"adset_schedule": LIVE_SCHEDULE, "pacing_type": ["day_parting"]})]
+
+
+@pytest.mark.parametrize("block", [
+    {"days": [1], "start_minute": 750, "end_minute": 1320},   # not on the hour
+    {"days": [1], "start_minute": 1320, "end_minute": 720},   # ends before it starts
+    {"days": [7], "start_minute": 720, "end_minute": 1320},   # bad weekday
+    {"days": [], "start_minute": 720, "end_minute": 1320},    # no days
+])
+def test_update_adset_schedule_rejects_invalid_blocks(graph, schedules, block):
+    with pytest.raises(AdsMcpError):
+        write.update_adset_schedule(_req({"adsetId": "as2", "schedule": [block]}), None)
+
+
+def test_update_adset_schedule_blocks_other_account(graph, schedules):
+    response = write.update_adset_schedule(_req({"adsetId": "as9", "schedule": LIVE_SCHEDULE}), None)
+
+    assert "approvalId" not in response
+    assert any(c["rule"] == "account-ownership" and not c["passed"] for c in response["ruleChecks"])
+
+
+def test_update_adset_schedule_requires_a_schedule(graph, schedules):
+    with pytest.raises(AdsMcpError):
+        write.update_adset_schedule(_req({"adsetId": "as2"}), None)

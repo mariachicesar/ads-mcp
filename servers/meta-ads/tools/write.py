@@ -15,6 +15,7 @@ from shared.meta_ads_client import (
     configured_account_id,
     create_account_object,
     get_account_snapshot,
+    get_adset_schedule,
     get_adset_targeting,
     get_object_snapshot,
     update_object,
@@ -234,6 +235,93 @@ def update_budget(request: ToolRequest, request_id: str | None) -> dict:
         dry_summary=f"Would set {label} {field.replace('_', ' ')} to ${new_usd:.2f} ({cents} cents).",
         done_summary=f"Set {label} {field.replace('_', ' ')} to ${new_usd:.2f}.",
         execute=lambda: update_object(config, object_id=object_id, fields={field: cents}, tool=tool),
+    )
+
+
+SCHEDULE_TIMEZONES = {"USER", "ADVERTISER"}
+DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+
+def _normalize_schedule(blocks: Any, tool: str) -> list[dict[str, Any]]:
+    """Validate adset_schedule blocks: weekdays 0-6 (0=Sunday), whole hours, start < end."""
+    if not isinstance(blocks, list) or not blocks:
+        raise _invalid("schedule must be a non-empty list of {days, start_minute, end_minute} blocks.", tool)
+    normalized = []
+    for block in blocks:
+        try:
+            days = sorted({int(d) for d in block["days"]})
+            start, end = int(block["start_minute"]), int(block["end_minute"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise _invalid("Each schedule block needs days, start_minute and end_minute.", tool) from exc
+        timezone_type = str(block.get("timezone_type") or "USER").upper()
+        if not days or any(d not in range(7) for d in days):
+            raise _invalid("days must be weekdays 0-6 (0 = Sunday).", tool)
+        if start % 60 or end % 60 or not 0 <= start < end <= 1440:
+            raise _invalid("start_minute/end_minute must be whole hours with 0 <= start < end <= 1440.", tool)
+        if timezone_type not in SCHEDULE_TIMEZONES:
+            raise _invalid("timezone_type must be USER or ADVERTISER.", tool)
+        normalized.append({"days": days, "start_minute": start, "end_minute": end, "timezone_type": timezone_type})
+    return normalized
+
+
+def _describe_schedule(blocks: list[dict[str, Any]]) -> str:
+    def clock(minute: int) -> str:
+        hour = minute // 60
+        return f"{(hour % 12) or 12}{'am' if hour < 12 or hour == 24 else 'pm'}"
+    return "; ".join(
+        f"{','.join(DAY_NAMES[d] for d in b['days'])} {clock(b['start_minute'])}-{clock(b['end_minute'])}"
+        f" ({'advertiser' if b['timezone_type'] == 'ADVERTISER' else 'viewer'} time)"
+        for b in blocks
+    )
+
+
+def update_adset_schedule(request: ToolRequest, request_id: str | None) -> dict:
+    tool = "update_adset_schedule"
+    payload = request.payload
+    adset_id = str(_required(payload, "adsetId", tool))
+    clone_from = str(payload.get("cloneScheduleFromAdsetId") or "").strip()
+    if not clone_from and not payload.get("schedule"):
+        raise _invalid("Provide schedule or cloneScheduleFromAdsetId.", tool)
+
+    config = load_meta_ads_config(business_key=request.businessKey, tool=tool)
+    expected = configured_account_id(config, tool=tool).removeprefix("act_")
+    target = get_adset_schedule(config, adset_id=adset_id, tool=tool)
+    source = None
+    if clone_from:
+        source = get_adset_schedule(config, adset_id=clone_from, tool=tool)
+        if not source.get("adset_schedule"):
+            raise _invalid(f"Ad set {clone_from} has no schedule to clone.", tool)
+        schedule = _normalize_schedule(source["adset_schedule"], tool)
+    else:
+        schedule = _normalize_schedule(payload["schedule"], tool)
+
+    rule_checks = []
+    for role, obj in (("account-ownership", target), ("schedule-source-ownership", source)):
+        if obj is None:
+            continue
+        owned = str(obj.get("account_id") or "") == expected
+        rule_checks.append(build_rule_check(
+            rule=role, passed=owned, severity="info" if owned else "blocking",
+            message=f"adset {obj.get('id')} {'belongs' if owned else 'does not belong'} to act_{expected}.",
+        ))
+
+    fields = {"adset_schedule": schedule, "pacing_type": ["day_parting"]}
+    label = f"adset '{target.get('name')}' ({adset_id})"
+    changes = [build_change(
+        field="adset.adset_schedule", label="Ad schedule",
+        before={"adset_schedule": target.get("adset_schedule"), "pacing_type": target.get("pacing_type")},
+        after=fields, resource_type="adset", resource_id=adset_id,
+    )]
+    return _write_flow(
+        request, request_id, tool=tool, rule_checks=rule_checks, changes=changes,
+        preview={
+            "adset": target,
+            **({"scheduleSource": {"adsetId": clone_from, "name": source.get("name")}} if source else {}),
+            "graphRequest": {"method": "POST", "path": adset_id, "fields": fields},
+        },
+        dry_summary=f"Would set {label} to run only {_describe_schedule(schedule)}.",
+        done_summary=f"Set {label} schedule: {_describe_schedule(schedule)}.",
+        execute=lambda: update_object(config, object_id=adset_id, fields=fields, tool=tool),
     )
 
 
