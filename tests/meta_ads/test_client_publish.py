@@ -114,3 +114,14 @@ def test_get_page_access_token_missing_permission_message(fake_requests):
 
     assert exc.value.error_code == "UPSTREAM_ERROR"
     assert "pages_manage_posts" in exc.value.message
+
+
+def test_get_page_access_token_oauth_error_names_permission(fake_requests):
+    fake_requests.bodies.append((403, {"error": {"message": "(#200) Requires pages_read_engagement", "code": 200}}))
+
+    with pytest.raises(AdsMcpError) as exc:
+        meta_ads_client.get_page_access_token(CONFIG, page_id="999")
+
+    assert exc.value.error_code == "UPSTREAM_ERROR"
+    assert "pages_manage_posts" in exc.value.message
+    assert exc.value.details["code"] == 200

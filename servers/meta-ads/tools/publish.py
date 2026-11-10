@@ -227,6 +227,13 @@ def schedule_page_reel(request: ToolRequest, request_id: str | None) -> dict:
     )
 
 
+def _graph_time(value: Any) -> datetime:
+    """Graph returns scheduled_publish_time as Unix seconds or as '2026-11-12T20:00:00+0000'."""
+    if isinstance(value, (int, float)) or str(value).isdigit():
+        return datetime.fromtimestamp(int(value), timezone.utc)
+    return datetime.strptime(str(value), "%Y-%m-%dT%H:%M:%S%z")
+
+
 def list_scheduled_page_videos(request: ToolRequest, request_id: str | None) -> dict:
     tool = "list_scheduled_page_videos"
     config = load_meta_ads_config(business_key=request.businessKey, tool=tool)
@@ -238,12 +245,12 @@ def list_scheduled_page_videos(request: ToolRequest, request_id: str | None) -> 
     rows = _graph_request(config, "GET", f"{page_id}/videos", access_token=page_token, tool=tool, params={
         "fields": "id,title,description,scheduled_publish_time,published,created_time", "limit": "100",
     }).get("data", [])
-    videos = [
-        {**row, "scheduledPacific": datetime.fromtimestamp(int(row["scheduled_publish_time"]), SCHEDULE_TZ).isoformat()}
-        for row in rows
-        if row.get("published") is False and row.get("scheduled_publish_time")
-    ]
-    videos.sort(key=lambda v: int(v["scheduled_publish_time"]))
+    videos = []
+    for row in rows:
+        if row.get("published") is False and row.get("scheduled_publish_time"):
+            when = _graph_time(row["scheduled_publish_time"])
+            videos.append({**row, "scheduledPacific": when.astimezone(SCHEDULE_TZ).isoformat(), "_sort": when})
+    videos.sort(key=lambda v: v.pop("_sort"))
     return build_success_response(
         service=SERVICE_NAME, tool=tool, mode="read", business_key=request.businessKey, request_id=request_id,
         summary=f"{len(videos)} scheduled video(s) on Page {page_id}.", data={"pageId": page_id, "videos": videos},

@@ -320,13 +320,16 @@ def get_adset_schedule(config: dict[str, Any], *, adset_id: str, tool: str | Non
 
 def get_page_access_token(config: dict[str, Any], *, page_id: str, tool: str | None = None) -> str:
     """Exchange the configured user token for the Page's access token (never stored)."""
-    row = _graph_request(config, "GET", page_id, params={"fields": "access_token"}, tool=tool)
+    hint = (f"Could not get a Page access token for {page_id}; the Meta user token needs "
+            "pages_manage_posts and pages_read_engagement, and the user must manage this Page.")
+    try:
+        row = _graph_request(config, "GET", page_id, params={"fields": "access_token"}, tool=tool)
+    except AdsMcpError as exc:
+        raise AdsMcpError(status_code=502, error_code="UPSTREAM_ERROR", tool=tool, message=hint,
+                          retryable=exc.retryable, details=exc.details) from exc
     token = row.get("access_token")
     if not token:
-        raise AdsMcpError(
-            status_code=502, error_code="UPSTREAM_ERROR", tool=tool,
-            message=f"Meta returned no Page access token for {page_id}; the token needs pages_manage_posts and pages_read_engagement on this Page.",
-        )
+        raise AdsMcpError(status_code=502, error_code="UPSTREAM_ERROR", tool=tool, message=hint)
     return str(token)
 
 

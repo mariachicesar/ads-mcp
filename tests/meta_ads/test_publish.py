@@ -273,3 +273,16 @@ def test_mcp_tools_registered():
     for name in ("meta_ads_upload_ad_video", "meta_ads_schedule_page_video",
                  "meta_ads_schedule_page_reel", "meta_ads_list_scheduled_page_videos"):
         assert hasattr(server, name)
+
+
+def test_list_scheduled_page_videos_accepts_graph_datetime_strings(publish_env, monkeypatch):
+    rows = [
+        {"id": "late", "published": False, "scheduled_publish_time": "2026-11-13T20:00:00+0000"},
+        {"id": "early", "published": False, "scheduled_publish_time": NOON_NOV12_PT},
+    ]
+    monkeypatch.setattr(publish, "_graph_request", lambda *a, **k: {"data": rows})
+
+    videos = publish.list_scheduled_page_videos(_req({}), None)["data"]["videos"]
+
+    assert [v["id"] for v in videos] == ["early", "late"]
+    assert videos[1]["scheduledPacific"] == "2026-11-13T12:00:00-08:00"
