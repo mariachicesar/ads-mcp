@@ -64,6 +64,18 @@ def _api_check(status: int, body: dict[str, Any], what: str, *, retryable: bool)
     raise _error(message + ".", retryable=return_retryable, tiktokCode=code, httpStatus=status, logId=err.get("log_id"))
 
 
+def exchange_code(*, client_key: str, client_secret: str, code: str, redirect_uri: str) -> dict[str, Any]:
+    """One-time authorization_code exchange (scripts/tiktok-auth.py). Returns TikTok's token response."""
+    status, body = _post(TOKEN_URL, data={
+        "client_key": client_key, "client_secret": client_secret, "code": code,
+        "grant_type": "authorization_code", "redirect_uri": redirect_uri,
+    }, headers={"Content-Type": "application/x-www-form-urlencoded", "Cache-Control": "no-cache"})
+    if not body.get("refresh_token"):
+        raise _error(f"TikTok code exchange failed: {body.get('error') or f'HTTP {status}'} "
+                     f"{body.get('error_description') or ''}".rstrip() + ".", retryable=False, logId=body.get("log_id"))
+    return body
+
+
 def refresh_access_token(config: dict[str, Any], *, secret_id: str) -> str:
     """Exchange the stored refresh token for an access token; persist a rotated refresh token first."""
     status, body = _post(TOKEN_URL, data={

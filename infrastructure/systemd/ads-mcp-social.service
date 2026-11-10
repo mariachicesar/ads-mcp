@@ -1,5 +1,5 @@
 [Unit]
-Description=ads-mcp scheduled social posts runner (Instagram)
+Description=ads-mcp scheduled social posts runner (Instagram, TikTok)
 After=network-online.target
 Wants=network-online.target
 

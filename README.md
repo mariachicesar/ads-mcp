@@ -413,6 +413,31 @@ Instagram's API cannot schedule posts, so the meta-ads server queues them in S3 
 - Token needs `instagram_basic` and `instagram_content_publish`; the Instagram account must be a professional account linked to the Page (`instagram_user_id` in the secret).
 - Logs: `/var/log/ads-mcp/scheduled-social.log`. Timer status: `systemctl list-timers ads-mcp-social.timer`.
 
+### TikTok scheduled inbox drafts (same S3 queue + timer)
+
+The `tiktok` MCP server queues videos in the same S3 queue (`platform: "tiktok"`); the same 30-minute runner sends each due video to the **TikTok app inbox as a draft**. You get a TikTok notification, open the draft, paste the caption and tap **Post**. Direct posting needs TikTok to audit the app; until then, inbox mode is the only option.
+
+| Tool | What it does |
+|------|--------------|
+| `tiktok_schedule_inbox_video` | Dry run → approvalId; execute uploads the video to S3 and queues it |
+| `tiktok_list_scheduled` | Lists queued TikToks with Pacific time and the **saved caption to paste** |
+| `tiktok_cancel_scheduled` | Cancels a **pending** TikTok (dry run → approvalId) |
+
+**One-time setup**
+
+1. On developers.tiktok.com, create an app with **Login Kit** and **Content Posting API**, scopes `user.info.basic` and `video.upload`, and redirect URI `https://mariachielcuis.com/`.
+2. Run `python scripts/tiktok-auth.py` (AWS credentials that can write Secrets Manager). Enter the Client key and secret, open the printed link while logged in to the business TikTok account, tap Authorize, and paste the address TikTok sends you to. This saves `/ads-mcp/el-cuis/tiktok/config`.
+3. Give the EC2 role `secretsmanager:PutSecretValue` on `arn:aws:secretsmanager:*:*:secret:/ads-mcp/*/tiktok/config*`. TikTok rotates the refresh token on use and the runner must save the new one; without this permission every TikTok run is requeued and then fails.
+4. Register the server for Claude Code: `claude mcp add tiktok -- .venv/Scripts/python.exe servers/tiktok/local_stdio.py` (needs `ADS_MCP_MEDIA_BUCKET` in `.env`).
+
+**Behavior**
+
+- Drafts carry **no caption**; the caption is kept on the queue entry and shown by `tiktok_list_scheduled` and in the entry's result note.
+- At most 5 pending TikTok drafts within any 24 h window (rule `tiktok-daily-limit`), matching TikTok's per-user cap.
+- Source: local `.mp4`/`.mov` ≤ 1 GiB; times as for Instagram (Pacific default, 10 minutes–75 days out); sent up to 30 minutes after the scheduled time.
+- The runner streams the video from S3 in memory (one chunk ≤ 64 MiB, otherwise 10 MiB chunks), never to disk. Upload errors retry up to 3 times; once all chunks are uploaded nothing is retried automatically (check the TikTok inbox before rescheduling).
+- The refresh token lasts about a year; if it expires or is revoked, entries fail with a hint to rerun `scripts/tiktok-auth.py`.
+
 ## Docs
 
 - `CLAUDE.md` — source of truth for all agents and MCP servers
