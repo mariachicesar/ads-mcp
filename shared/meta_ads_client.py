@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 from importlib import import_module
 from typing import Any
 
@@ -11,6 +12,8 @@ from shared.errors import AdsMcpError
 
 DEFAULT_API_VERSION = "v23.0"
 GRAPH_BASE_URL = "https://graph.facebook.com"
+GRAPH_VIDEO_URL = "https://graph-video.facebook.com"
+RUPLOAD_URL = "https://rupload.facebook.com/video-upload"
 
 INSIGHT_FIELDS = [
     "campaign_id", "campaign_name", "adset_id", "adset_name", "ad_id", "ad_name",
@@ -207,9 +210,10 @@ def list_ad_creatives(config: dict[str, Any], *, tool: str | None = None) -> lis
 def _graph_request(
     config: dict[str, Any], method: str, path: str, *,
     params: dict[str, Any] | None = None, data: dict[str, Any] | None = None,
-    tool: str | None = None,
+    files: dict[str, Any] | None = None, base_url: str | None = None,
+    access_token: str | None = None, tool: str | None = None,
 ) -> dict[str, Any]:
-    access_token = config.get("access_token")
+    access_token = access_token or config.get("access_token")
     if not access_token:
         raise AdsMcpError(
             status_code=500,
@@ -232,11 +236,12 @@ def _graph_request(
             for key, value in data.items() if value is not None
         }
     version = config.get("api_version") or DEFAULT_API_VERSION
-    url = f"{GRAPH_BASE_URL}/{version}/{path.lstrip('/')}"
+    url = f"{base_url or GRAPH_BASE_URL}/{version}/{path.lstrip('/')}"
+    extra = {"files": files} if files else {}
     try:
         response = requests.request(
             method, url, params=query, data=form,
-            headers={"Authorization": f"Bearer {access_token}"}, timeout=30,
+            headers={"Authorization": f"Bearer {access_token}"}, timeout=300 if files else 30, **extra,
         )
     except Exception as exc:
         raise AdsMcpError(
@@ -311,6 +316,66 @@ def get_adset_schedule(config: dict[str, Any], *, adset_id: str, tool: str | Non
     """Return an ad set's id, name, account_id, budgets, pacing_type and adset_schedule."""
     fields = "id,name,account_id,status,daily_budget,lifetime_budget,pacing_type,adset_schedule"
     return _graph_request(config, "GET", adset_id, params={"fields": fields}, tool=tool)
+
+
+def get_page_access_token(config: dict[str, Any], *, page_id: str, tool: str | None = None) -> str:
+    """Exchange the configured user token for the Page's access token (never stored)."""
+    row = _graph_request(config, "GET", page_id, params={"fields": "access_token"}, tool=tool)
+    token = row.get("access_token")
+    if not token:
+        raise AdsMcpError(
+            status_code=502, error_code="UPSTREAM_ERROR", tool=tool,
+            message=f"Meta returned no Page access token for {page_id}; the token needs pages_manage_posts and pages_read_engagement on this Page.",
+        )
+    return str(token)
+
+
+def post_video(
+    config: dict[str, Any], *, path: str, fields: dict[str, Any],
+    file_path: str | None, file_url: str | None,
+    access_token: str | None = None, tool: str | None = None,
+) -> dict[str, Any]:
+    """POST a video to graph-video.facebook.com as multipart (local file) or by file_url."""
+    if file_path:
+        with open(file_path, "rb") as fh:
+            return _graph_request(config, "POST", path, data=dict(fields), files={"source": fh},
+                                  base_url=GRAPH_VIDEO_URL, access_token=access_token, tool=tool)
+    return _graph_request(config, "POST", path, data={**fields, "file_url": file_url},
+                          base_url=GRAPH_VIDEO_URL, access_token=access_token, tool=tool)
+
+
+def upload_reel_bytes(
+    config: dict[str, Any], *, video_id: str, access_token: str,
+    file_path: str | None, file_url: str | None, tool: str | None = None,
+) -> dict[str, Any]:
+    """Send a Reel's bytes (or its hosted URL) to rupload.facebook.com for an upload session."""
+    requests = import_module("requests")
+    version = config.get("api_version") or DEFAULT_API_VERSION
+    url = f"{RUPLOAD_URL}/{version}/{video_id}"
+    headers = {"Authorization": f"OAuth {access_token}"}
+    try:
+        if file_path:
+            headers.update(offset="0", file_size=str(os.path.getsize(file_path)))
+            with open(file_path, "rb") as fh:
+                response = requests.post(url, headers=headers, data=fh, timeout=300)
+        else:
+            headers["file_url"] = str(file_url)
+            response = requests.post(url, headers=headers, timeout=300)
+    except Exception as exc:
+        raise AdsMcpError(status_code=502, error_code="UPSTREAM_ERROR", tool=tool, retryable=True,
+                          message=f"Reel upload request failed for video {video_id}.",
+                          details={"reason": str(exc), "videoId": video_id}) from exc
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+    if response.status_code >= 400 or (isinstance(body, dict) and "error" in body):
+        error = body.get("error") if isinstance(body, dict) else None
+        details = _graph_error_details(error) if isinstance(error, dict) else {"reason": response.text[:500]}
+        raise AdsMcpError(status_code=502, error_code="UPSTREAM_ERROR", tool=tool,
+                          message=f"Meta rejected the Reel upload for video {video_id}.",
+                          details={**details, "httpStatus": response.status_code, "videoId": video_id})
+    return body if isinstance(body, dict) else {"data": body}
 
 
 def update_object(config: dict[str, Any], *, object_id: str, fields: dict[str, Any], tool: str | None = None) -> dict[str, Any]:
