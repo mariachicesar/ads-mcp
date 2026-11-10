@@ -22,6 +22,8 @@ def ig_env(monkeypatch, fake_s3):
     env = {"ig_user_id": "17841400000000000", "s3": fake_s3}
     monkeypatch.setattr(instagram, "load_meta_ads_config", lambda **kw: dict(CONFIG))
     monkeypatch.setattr(instagram, "get_instagram_user_id", lambda config, *, page_id, tool=None: env["ig_user_id"])
+    monkeypatch.setattr(instagram, "check_instagram_publish_access",
+                        lambda config, *, ig_user_id, tool=None: (True, f"Posts to Instagram @mariachielcuis ({ig_user_id}).", "mariachielcuis"))
     monkeypatch.setattr(instagram.publish, "_now", lambda: NOW)
     monkeypatch.setattr(approval_store, "_MEMORY_APPROVAL_STORE", approval_store.InMemoryApprovalStore())
     return env
@@ -149,3 +151,20 @@ def test_routes_and_tools_registered():
     server = load_service_module("meta-ads", "mcp_server")
     for name in ("meta_ads_schedule_instagram_reel", "meta_ads_list_scheduled_social", "meta_ads_cancel_scheduled_social"):
         assert hasattr(server, name)
+
+
+def test_schedule_blocked_when_token_cannot_publish(ig_env, tmp_path, monkeypatch):
+    monkeypatch.setattr(instagram, "check_instagram_publish_access",
+                        lambda config, *, ig_user_id, tool=None: (False, "token lacks instagram_content_publish", None))
+    r = instagram.schedule_instagram_reel(_req(_payload(tmp_path)), None)
+
+    assert "approvalId" not in r
+    check = next(c for c in r["ruleChecks"] if c["rule"] == "instagram-linked")
+    assert not check["passed"] and "instagram_content_publish" in check["message"]
+
+
+def test_schedule_rejects_video_over_instagram_limit(ig_env, tmp_path, monkeypatch):
+    monkeypatch.setattr(instagram, "MAX_REEL_BYTES", 5)
+    with pytest.raises(AdsMcpError) as exc:
+        instagram.schedule_instagram_reel(_req(_payload(tmp_path)), None)
+    assert exc.value.error_code == "REQUEST_INVALID" and "300 MB" in exc.value.message

@@ -138,3 +138,18 @@ def test_get_instagram_user_id_from_page_or_none(fake_requests):
 
     assert meta_ads_client.get_instagram_user_id(CONFIG, page_id="999") == "17841"
     assert meta_ads_client.get_instagram_user_id(CONFIG, page_id="999") is None
+
+
+def test_check_instagram_publish_access(fake_requests):
+    fake_requests.bodies.append((200, {"id": "178", "username": "mariachielcuis"}))
+    fake_requests.bodies.append((200, {"data": [{"permission": "instagram_content_publish", "status": "granted"}]}))
+    assert meta_ads_client.check_instagram_publish_access(CONFIG, ig_user_id="178") == (True, "Posts to Instagram @mariachielcuis (178).", "mariachielcuis")
+
+    fake_requests.bodies.append((200, {"id": "178", "username": "mariachielcuis"}))
+    fake_requests.bodies.append((200, {"data": [{"permission": "instagram_basic", "status": "granted"}]}))
+    ok, message, _ = meta_ads_client.check_instagram_publish_access(CONFIG, ig_user_id="178")
+    assert not ok and "instagram_content_publish" in message
+
+    fake_requests.bodies.append((400, {"error": {"message": "Unsupported get request", "code": 100}}))
+    ok, message, _ = meta_ads_client.check_instagram_publish_access(CONFIG, ig_user_id="178")
+    assert not ok and "Unsupported get request" in message

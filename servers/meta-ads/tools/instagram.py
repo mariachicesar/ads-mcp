@@ -11,7 +11,8 @@ from datetime import datetime
 from typing import Any
 
 from shared import media_queue
-from shared.meta_ads_client import get_instagram_user_id
+from shared.errors import AdsMcpError
+from shared.meta_ads_client import check_instagram_publish_access, get_instagram_user_id
 from shared.models import ToolRequest
 from shared.responses import build_change, build_rule_check, build_success_response
 from shared.runtime_config import load_meta_ads_config
@@ -20,6 +21,7 @@ from tools.write import SERVICE_NAME, _invalid, _required, _write_flow
 
 MAX_CAPTION_CHARS = 2200
 MAX_HASHTAGS = 30
+MAX_REEL_BYTES = 300_000_000  # Instagram Reels publishing limit (300 MB)
 RUNNER_INTERVAL_MINUTES = 30
 DEFAULT_LIST_STATES = ("pending", "processing", "failed")
 
@@ -50,15 +52,22 @@ def schedule_instagram_reel(request: ToolRequest, request_id: str | None) -> dic
     caption = _caption(payload, tool)
     when = publish._parse_schedule_time(_required(payload, "scheduledTime", tool), tool)
     source, sha = publish._video_source(payload, tool)
+    if source["bytes"] > MAX_REEL_BYTES:
+        raise _invalid(f"Video is {source['bytes']:,} bytes; Instagram Reels are limited to 300 MB.", tool)
 
     config = load_meta_ads_config(business_key=request.businessKey, tool=tool)
-    ig_user_id = get_instagram_user_id(config, page_id=str(config.get("page_id")), tool=tool)
+    try:
+        ig_user_id = get_instagram_user_id(config, page_id=str(config.get("page_id")), tool=tool)
+    except AdsMcpError as exc:
+        ig_user_id, linked_ok, linked_msg = None, False, f"Could not look up the Page's Instagram account: {exc.message}"
+    else:
+        if ig_user_id:
+            linked_ok, linked_msg, _ = check_instagram_publish_access(config, ig_user_id=ig_user_id, tool=tool)
+        else:
+            linked_ok, linked_msg = False, "No Instagram professional account is linked to the configured Page (or the token lacks instagram_basic)."
     rule_checks = [
-        build_rule_check(
-            rule="instagram-linked", passed=bool(ig_user_id), severity="info" if ig_user_id else "blocking",
-            message=(f"Posts to Instagram account {ig_user_id}." if ig_user_id else
-                     "No Instagram professional account is linked to the configured Page (or the token lacks instagram_basic)."),
-        ),
+        build_rule_check(rule="instagram-linked", passed=linked_ok, severity="info" if linked_ok else "blocking",
+                         message=linked_msg),
         publish._schedule_window_check(when),
     ]
     entry = {

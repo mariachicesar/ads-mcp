@@ -154,3 +154,35 @@ def test_publish_instagram_entry_uses_presigned_url(fake_s3, monkeypatch):
     assert result == {"mediaId": "m9"}
     assert seen["ig_user_id"] == "178" and seen["video_url"].startswith("https://s3.example/videos/el-cuis/x.mp4")
     assert seen["caption"] == "hola" and seen["share_to_feed"] is True
+
+
+def test_bad_entry_does_not_block_other_posts(fake_s3):
+    fake_s3.objects["queue/pending/20261112T2000Z-broken.json"] = b"{not json"
+    _enqueue(NOW - timedelta(minutes=5))
+    pub = Publisher()
+
+    counts = runner.run_once(now=NOW, publishers={"instagram": pub})
+
+    assert counts["published"] == 1 and len(pub.calls) == 1
+    assert counts["failed"] == 1
+    assert "queue/pending/20261112T2000Z-broken.json" not in fake_s3.objects
+
+
+def test_last_error_uses_graph_reason(fake_s3):
+    _enqueue(NOW - timedelta(minutes=5))
+    pub = Publisher(AdsMcpError(status_code=502, error_code="UPSTREAM_ERROR", message="Meta Graph API rejected POST 178/media.",
+                                details={"reason": "(#10) Application does not have permission", "userMessage": "Missing permission"}))
+
+    runner.run_once(now=NOW, publishers={"instagram": pub})
+
+    assert _states(fake_s3)["failed"][0]["lastError"] == "Missing permission"
+
+
+def test_non_json_result_is_serialized(fake_s3):
+    _enqueue(NOW - timedelta(minutes=5))
+    pub = Publisher({"mediaId": "m1", "at": NOW})
+
+    counts = runner.run_once(now=NOW, publishers={"instagram": pub})
+
+    assert counts["published"] == 1
+    assert _states(fake_s3)["done"][0]["result"]["at"].startswith("2026-11-12")

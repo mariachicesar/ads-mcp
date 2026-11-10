@@ -61,50 +61,78 @@ def _fail(key: str, entry: dict[str, Any], reason: str, counts: dict[str, int], 
     log.error("failed %s %s (%s): %s", entry.get("platform"), entry.get("id"), entry.get("businessKey"), reason)
 
 
+def _reason(exc: AdsMcpError) -> str:
+    """The most useful human-readable cause: Meta's userMessage/reason beats our wrapper message."""
+    return str(exc.details.get("userMessage") or exc.details.get("reason") or exc.message)
+
+
+def _handle_processing(entry: dict[str, Any], now: datetime, counts: dict[str, int]) -> None:
+    claimed = entry.get("claimedAt")
+    if claimed and now - _parse(claimed) > STALE_PROCESSING_AFTER:
+        _fail(entry["_key"], entry, "stale processing; check Instagram before retrying", counts)
+
+
+def _handle_pending(entry: dict[str, Any], now: datetime, publishers: dict[str, Publisher], counts: dict[str, int]) -> None:
+    due = _parse(entry["scheduledAt"])
+    if due > now:
+        return
+    if now - due > MISSED_AFTER:
+        _fail(entry["_key"], entry, "missed: more than 24h late", counts)
+        return
+    try:
+        key = media_queue.move(entry["_key"], "processing", updates={"claimedAt": _iso(datetime.now(timezone.utc))})
+    except KeyError:
+        counts["skipped"] += 1
+        return
+
+    attempts = int(entry.get("attempts") or 0) + 1
+    publisher = publishers.get(entry.get("platform"))
+    if publisher is None:
+        _fail(key, entry, f"no publisher for platform {entry.get('platform')!r}", counts, attempts=attempts)
+        return
+    try:
+        result = publisher(entry)
+    except AdsMcpError as exc:
+        reason = _reason(exc)
+        if exc.retryable and attempts < MAX_ATTEMPTS:
+            media_queue.move(key, "pending", updates={"attempts": attempts, "lastError": reason})
+            counts["retried"] += 1
+            log.warning("retry %s %s attempt %d: %s", entry.get("platform"), entry.get("id"), attempts, reason)
+        else:
+            _fail(key, entry, reason, counts, attempts=attempts, errorDetails=exc.details)
+        return
+    except Exception as exc:  # noqa: BLE001 - unknown state; never retry automatically
+        _fail(key, entry, f"{type(exc).__name__}: {exc}", counts, attempts=attempts)
+        return
+
+    media_queue.move(key, "done", updates={"attempts": attempts, "result": result, "publishedAt": _iso(now)})
+    counts["published"] += 1
+    log.info("published %s %s (%s): %s", entry.get("platform"), entry.get("id"), entry.get("businessKey"), result)
+
+
+def _guarded(entry: dict[str, Any], counts: dict[str, int], handler: Callable[[], None]) -> None:
+    """Run one entry's handler; a bad entry is failed or quarantined instead of stopping the run."""
+    if entry.get("_invalid"):
+        media_queue.quarantine(entry["_key"], f"unreadable entry: {entry['_invalid']}")
+        counts["failed"] += 1
+        log.error("quarantined unreadable entry %s: %s", entry["_key"], entry["_invalid"])
+        return
+    try:
+        handler()
+    except Exception as exc:  # noqa: BLE001
+        log.exception("error handling %s", entry.get("_key"))
+        try:
+            _fail(entry["_key"], entry, f"runner error: {type(exc).__name__}: {exc}", counts)
+        except Exception:  # noqa: BLE001 - already moved, or S3 down; next run retries the cleanup
+            log.exception("could not mark %s failed", entry.get("_key"))
+
+
 def run_once(*, now: datetime, publishers: dict[str, Publisher]) -> dict[str, int]:
     counts = {"published": 0, "retried": 0, "failed": 0, "skipped": 0}
-
     for entry in media_queue.list_entries(states=("processing",)):
-        claimed = entry.get("claimedAt")
-        if claimed and now - _parse(claimed) > STALE_PROCESSING_AFTER:
-            _fail(entry["_key"], entry, "stale processing; check Instagram before retrying", counts)
-
+        _guarded(entry, counts, lambda e=entry: _handle_processing(e, now, counts))
     for entry in media_queue.list_entries(states=("pending",)):
-        due = _parse(entry["scheduledAt"])
-        if due > now:
-            continue
-        if now - due > MISSED_AFTER:
-            _fail(entry["_key"], entry, "missed: more than 24h late", counts)
-            continue
-        try:
-            key = media_queue.move(entry["_key"], "processing", updates={"claimedAt": _iso(now)})
-        except KeyError:
-            counts["skipped"] += 1
-            continue
-
-        attempts = int(entry.get("attempts") or 0) + 1
-        publisher = publishers.get(entry.get("platform"))
-        if publisher is None:
-            _fail(key, entry, f"no publisher for platform {entry.get('platform')!r}", counts, attempts=attempts)
-            continue
-        try:
-            result = publisher(entry)
-        except AdsMcpError as exc:
-            if exc.retryable and attempts < MAX_ATTEMPTS:
-                media_queue.move(key, "pending", updates={"attempts": attempts, "lastError": exc.message})
-                counts["retried"] += 1
-                log.warning("retry %s %s attempt %d: %s", entry.get("platform"), entry.get("id"), attempts, exc.message)
-            else:
-                _fail(key, entry, exc.message, counts, attempts=attempts, errorDetails=exc.details)
-            continue
-        except Exception as exc:  # noqa: BLE001 - unknown state; never retry automatically
-            _fail(key, entry, f"{type(exc).__name__}: {exc}", counts, attempts=attempts)
-            continue
-
-        media_queue.move(key, "done", updates={"attempts": attempts, "result": result, "publishedAt": _iso(now)})
-        counts["published"] += 1
-        log.info("published %s %s (%s): %s", entry.get("platform"), entry.get("id"), entry.get("businessKey"), result)
-
+        _guarded(entry, counts, lambda e=entry: _handle_pending(e, now, publishers, counts))
     return counts
 
 

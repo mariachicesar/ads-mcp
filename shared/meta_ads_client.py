@@ -342,6 +342,22 @@ def get_instagram_user_id(config: dict[str, Any], *, page_id: str, tool: str | N
     return str(account["id"]) if account.get("id") else None
 
 
+def check_instagram_publish_access(
+    config: dict[str, Any], *, ig_user_id: str, tool: str | None = None,
+) -> tuple[bool, str, str | None]:
+    """(ok, message, username): the token can read the IG account and has instagram_content_publish."""
+    try:
+        account = _graph_request(config, "GET", ig_user_id, params={"fields": "id,username"}, tool=tool)
+        perms = _graph_request(config, "GET", "me/permissions", tool=tool).get("data", [])
+    except AdsMcpError as exc:
+        reason = exc.details.get("userMessage") or exc.details.get("reason") or exc.message
+        return False, f"Cannot read Instagram account {ig_user_id}: {reason}", None
+    granted = {p.get("permission") for p in perms if p.get("status") == "granted"}
+    if "instagram_content_publish" not in granted:
+        return False, "The Meta token lacks instagram_content_publish.", account.get("username")
+    return True, f"Posts to Instagram @{account.get('username')} ({ig_user_id}).", account.get("username")
+
+
 def post_video(
     config: dict[str, Any], *, path: str, fields: dict[str, Any],
     file_path: str | None, file_url: str | None,

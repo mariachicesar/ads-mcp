@@ -72,7 +72,7 @@ def enqueue(entry: dict[str, Any], *, bucket: str | None = None) -> str:
     body = {**entry, "id": uuid.uuid4().hex, "createdAt": _utc_iso(datetime.now(timezone.utc)),
             "attempts": 0, "lastError": None, "result": None}
     key = _entry_key("pending", body)
-    _s3_client().put_object(Bucket=name, Key=key, Body=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+    _s3_client().put_object(Bucket=name, Key=key, Body=json.dumps(body, ensure_ascii=False, default=str).encode("utf-8"),
                             ContentType="application/json")
     return key
 
@@ -90,11 +90,19 @@ def list_entries(*, states: tuple[str, ...], business_key: str | None = None, pl
             page = client.list_objects_v2(**kwargs)
             for obj in page.get("Contents", []):
                 try:
-                    entry = json.loads(client.get_object(Bucket=name, Key=obj["Key"])["Body"].read())
+                    raw = client.get_object(Bucket=name, Key=obj["Key"])["Body"].read()
                 except Exception as exc:  # noqa: BLE001 - moved by another process between list and get
                     if _is_missing(client, exc):
                         continue
                     raise
+                try:
+                    entry = json.loads(raw)
+                    if not isinstance(entry, dict):
+                        raise ValueError("entry is not a JSON object")
+                except ValueError as exc:
+                    # Unreadable entry: surface it so the runner can quarantine it.
+                    rows.append({"_key": obj["Key"], "_state": state, "_invalid": str(exc), "scheduledAt": ""})
+                    continue
                 if business_key and entry.get("businessKey") != business_key:
                     continue
                 if platform and entry.get("platform") != platform:
@@ -124,7 +132,7 @@ def move(key: str, to_state: str, *, updates: dict[str, Any] | None = None, buck
         # Conditional write: only one runner can create the processing copy.
         extra["IfNoneMatch"] = "*"
     try:
-        client.put_object(Bucket=name, Key=new_key, Body=json.dumps(entry, ensure_ascii=False).encode("utf-8"),
+        client.put_object(Bucket=name, Key=new_key, Body=json.dumps(entry, ensure_ascii=False, default=str).encode("utf-8"),
                           ContentType="application/json", **extra)
     except Exception as exc:  # noqa: BLE001
         code = str(getattr(exc, "response", {}).get("Error", {}).get("Code", ""))
@@ -140,3 +148,14 @@ def presigned_get(key: str, *, expires: int = 3600, bucket: str | None = None) -
     return _s3_client().generate_presigned_url(
         "get_object", Params={"Bucket": _bucket(bucket), "Key": key}, ExpiresIn=expires,
     )
+
+
+def quarantine(key: str, reason: str, *, bucket: str | None = None) -> str:
+    """Move an unreadable entry's raw bytes to queue/failed/ (with a .reason.txt) without parsing it."""
+    name, client = _bucket(bucket), _s3_client()
+    raw = client.get_object(Bucket=name, Key=key)["Body"].read()
+    new_key = "queue/failed/" + key.rsplit("/", 1)[-1]
+    client.put_object(Bucket=name, Key=new_key, Body=raw)
+    client.put_object(Bucket=name, Key=new_key + ".reason.txt", Body=reason.encode("utf-8"))
+    client.delete_object(Bucket=name, Key=key)
+    return new_key

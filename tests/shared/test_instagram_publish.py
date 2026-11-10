@@ -57,3 +57,53 @@ def test_container_timeout_fails(fake_graph):
         _publish(poll_seconds=10, timeout_seconds=30)
 
     assert exc.value.details["containerStatus"] == "IN_PROGRESS"
+
+
+def test_media_publish_failure_is_not_retryable_and_carries_container(fake_graph, monkeypatch):
+    real = instagram_publish._graph_request
+
+    def flaky(config, method, path, **kw):
+        if path.endswith("/media_publish"):
+            raise AdsMcpError(status_code=502, error_code="UPSTREAM_ERROR", message="timeout", retryable=True)
+        if method == "GET" and path == "cont1" and kw.get("params", {}).get("fields") == "status_code,status" and not fake_graph["statuses"]:
+            return {"status_code": "FINISHED"}
+        return real(config, method, path, **kw)
+
+    monkeypatch.setattr(instagram_publish, "_graph_request", flaky)
+    with pytest.raises(AdsMcpError) as exc:
+        _publish()
+
+    assert exc.value.retryable is False
+    assert exc.value.details["containerId"] == "cont1"
+
+
+def test_media_publish_failure_but_container_published_counts_as_done(fake_graph, monkeypatch):
+    real = instagram_publish._graph_request
+
+    def flaky(config, method, path, **kw):
+        if path.endswith("/media_publish"):
+            raise AdsMcpError(status_code=502, error_code="UPSTREAM_ERROR", message="timeout", retryable=True)
+        if method == "GET" and path == "cont1" and not fake_graph["statuses"]:
+            return {"status_code": "PUBLISHED"}
+        return real(config, method, path, **kw)
+
+    monkeypatch.setattr(instagram_publish, "_graph_request", flaky)
+    result = _publish()
+
+    assert result["containerId"] == "cont1" and result["mediaId"] is None
+    assert "PUBLISHED" in result["note"]
+
+
+def test_container_error_includes_instagram_status_text(fake_graph, monkeypatch):
+    real = instagram_publish._graph_request
+
+    def with_status(config, method, path, **kw):
+        if method == "GET" and path == "cont1":
+            return {"status_code": "ERROR", "status": "Error: 2207026 unsupported video format"}
+        return real(config, method, path, **kw)
+
+    monkeypatch.setattr(instagram_publish, "_graph_request", with_status)
+    with pytest.raises(AdsMcpError) as exc:
+        _publish()
+
+    assert "2207026 unsupported video format" in exc.value.message
