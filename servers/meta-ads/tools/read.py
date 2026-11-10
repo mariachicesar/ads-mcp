@@ -18,6 +18,7 @@ from shared.runtime_config import load_meta_ads_config
 SERVICE_NAME = "meta-ads"
 DATE_PRESETS = {
     "LAST_7_DAYS": "last_7d",
+    "LAST_14_DAYS": "last_14d",
     "LAST_30_DAYS": "last_30d",
     "THIS_MONTH": "this_month",
     "LAST_MONTH": "last_month",

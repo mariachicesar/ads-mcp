@@ -65,6 +65,7 @@ def build_success_response(
     executed: bool = False,
     freshness: dict[str, Any] | None = None,
     warnings: list[str] | None = None,
+    approval: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     response = {
         "ok": True,
@@ -80,7 +81,10 @@ def build_success_response(
         "requiresConfirmation": requires_confirmation,
         "executed": executed,
     }
-    if requires_confirmation and "dry" in mode:
+    if approval is not None:
+        # A stored approval (shared.approval_store) that execute will verify.
+        response.update(approval)
+    elif requires_confirmation and "dry" in mode:
         response["approvalId"] = str(uuid.uuid4())
     if freshness is not None:
         response["freshness"] = freshness

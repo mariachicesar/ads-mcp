@@ -17,6 +17,7 @@ from tools.read import (
     list_ad_accounts,
     list_creative_assets,
 )
+from tools.write import create_ad, create_adset, create_campaign, update_budget, update_status
 from shared.auth import SignedRequestMiddleware
 from shared.errors import AdsMcpError
 from shared.models import ToolRequest
@@ -92,6 +93,31 @@ def tool_get_audience_performance(request: ToolRequest, http_request: Request) -
 @app.post("/tools/list_creative_assets")
 def tool_list_creative_assets(request: ToolRequest, http_request: Request) -> dict:
     return list_creative_assets(request, _request_id(http_request))
+
+
+@app.post("/tools/update_status")
+def tool_update_status(request: ToolRequest, http_request: Request) -> dict:
+    return update_status(request, _request_id(http_request))
+
+
+@app.post("/tools/update_budget")
+def tool_update_budget(request: ToolRequest, http_request: Request) -> dict:
+    return update_budget(request, _request_id(http_request))
+
+
+@app.post("/tools/create_campaign")
+def tool_create_campaign(request: ToolRequest, http_request: Request) -> dict:
+    return create_campaign(request, _request_id(http_request))
+
+
+@app.post("/tools/create_adset")
+def tool_create_adset(request: ToolRequest, http_request: Request) -> dict:
+    return create_adset(request, _request_id(http_request))
+
+
+@app.post("/tools/create_ad")
+def tool_create_ad(request: ToolRequest, http_request: Request) -> dict:
+    return create_ad(request, _request_id(http_request))
 
 
 if __name__ == "__main__":
