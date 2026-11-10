@@ -1,11 +1,12 @@
 """Google Business Profile API client helpers.
 
 Uses the Google API Python Client with OAuth2 credentials loaded from config.
-Covers three GBP REST APIs:
-  - mybusinessbusinessinformation  (location info, attributes)
-  - mybusinessreviews              (list + reply to reviews)
-  - mybusinesspostings             (local posts)
-  - mybusinessmedia                (photo uploads)
+Covers these GBP REST APIs:
+  - mybusinessbusinessinformation v1  (location info, attributes)
+  - My Business v4 (mybusiness.googleapis.com/v4) for reviews, local posts
+    and media. Google never published v1 discovery docs for reviews or media
+    ("mybusinessreviews"/"mybusinessmedia" v1 don't exist), so these go
+    through direct REST calls via _v4_request().
 """
 from __future__ import annotations
 
@@ -76,7 +77,15 @@ def _build_service(api_name: str, version: str, config: dict[str, Any], *, tool:
     )
 
 
-def _postings_request(
+def _access_token(config: dict[str, Any], *, tool: str | None = None) -> str:
+    from google.auth.transport.requests import Request as GoogleAuthRequest
+
+    creds = _build_credentials(config, tool=tool)
+    creds.refresh(GoogleAuthRequest())
+    return creds.token
+
+
+def _v4_request(
     method: str,
     path: str,
     config: dict[str, Any],
@@ -85,20 +94,16 @@ def _postings_request(
     params: dict | None = None,
     tool: str | None = None,
 ) -> dict:
-    """Direct REST call to the My Business v4 API for local posts.
+    """Direct REST call to the My Business v4 API (posts, reviews, media).
 
     path should be relative to https://mybusiness.googleapis.com/v4/
     e.g. "accounts/123/locations/456/localPosts"
     """
     import requests
-    from google.auth.transport.requests import Request as GoogleAuthRequest
-
-    creds = _build_credentials(config, tool=tool)
-    creds.refresh(GoogleAuthRequest())
 
     url = f"https://mybusiness.googleapis.com/v4/{path}"
     headers = {
-        "Authorization": f"Bearer {creds.token}",
+        "Authorization": f"Bearer {_access_token(config, tool=tool)}",
         "Content-Type": "application/json",
     }
     resp = requests.request(method, url, headers=headers, json=body, params=params, timeout=30)
@@ -106,13 +111,17 @@ def _postings_request(
         raise AdsMcpError(
             status_code=502,
             error_code="UPSTREAM_ERROR",
-            message=f"GBP postings API error: {resp.status_code} — url={url} — {resp.text[:300]}",
+            message=f"GBP v4 API error: {resp.status_code} — url={url} — {resp.text[:300]}",
             tool=tool,
             retryable=resp.status_code >= 500,
         )
     if resp.status_code == 204 or not resp.content:
         return {}
     return resp.json()
+
+
+# Backwards-compatible alias (scripts may import the old name).
+_postings_request = _v4_request
 
 
 # ---------------------------------------------------------------------------
@@ -157,11 +166,15 @@ def get_location_name(config: dict[str, Any], *, tool: str | None = None) -> str
 
 def fetch_location_info(config: dict[str, Any], *, tool: str | None = None) -> dict[str, Any]:
     service = _build_service("mybusinessbusinessinformation", "v1", config, tool=tool)
-    location_name = get_location_name(config, tool=tool)
+    # The Business Information API (v1) names locations "locations/{id}" with no
+    # account prefix, unlike the v4 posts API that get_location_name() serves.
+    location_name = "locations/" + get_location_name(config, tool=tool).rsplit("/", 1)[-1]
     try:
         result = (
             service.locations()
-            .get(name=location_name, readMask="name,title,phoneNumbers,websiteUri,regularHours,businessStatus")
+            # Business Information v1 has no "businessStatus" field — open/closed
+            # status lives under openInfo.status.
+            .get(name=location_name, readMask="name,title,phoneNumbers,websiteUri,regularHours,openInfo")
             .execute()
         )
     except Exception as exc:
@@ -185,24 +198,11 @@ def list_reviews(
     tool: str | None = None,
 ) -> dict[str, Any]:
     """List reviews for the location. filter_reply: 'replied' | 'unreplied' | None."""
-    service = _build_service("mybusinessreviews", "v1", config, tool=tool)
     location_name = get_location_name(config, tool=tool)
-    try:
-        req = service.locations().reviews().list(
-            parent=location_name,
-            pageSize=page_size,
-            orderBy=order_by,
-        )
-        result = req.execute()
-    except Exception as exc:
-        raise AdsMcpError(
-            status_code=502,
-            error_code="UPSTREAM_ERROR",
-            message="GBP review listing failed.",
-            tool=tool,
-            retryable=True,
-            details={"reason": str(exc)},
-        ) from exc
+    result = _v4_request(
+        "GET", f"{location_name}/reviews", config,
+        params={"pageSize": page_size, "orderBy": order_by}, tool=tool,
+    )
 
     reviews = result.get("reviews", [])
 
@@ -230,6 +230,8 @@ def list_reviews(
     return {
         "locationName": location_name,
         "totalReviews": len(normalised),
+        "averageRating": result.get("averageRating"),
+        "totalReviewCount": result.get("totalReviewCount"),
         "reviews": normalised,
         "nextPageToken": result.get("nextPageToken"),
     }
@@ -243,7 +245,7 @@ def list_posts(
 ) -> dict[str, Any]:
     """List existing local posts."""
     location_name = get_location_name(config, tool=tool)
-    result = _postings_request(
+    result = _v4_request(
         "GET", f"{location_name}/localPosts",
         config, params={"pageSize": page_size}, tool=tool,
     )
@@ -280,22 +282,11 @@ def list_media(
     tool: str | None = None,
 ) -> dict[str, Any]:
     """List photos/videos on the listing."""
-    service = _build_service("mybusinessmedia", "v1", config, tool=tool)
     location_name = get_location_name(config, tool=tool)
-    try:
-        result = service.locations().media().list(
-            parent=location_name,
-            pageSize=page_size,
-        ).execute()
-    except Exception as exc:
-        raise AdsMcpError(
-            status_code=502,
-            error_code="UPSTREAM_ERROR",
-            message="GBP media listing failed.",
-            tool=tool,
-            retryable=True,
-            details={"reason": str(exc)},
-        ) from exc
+    result = _v4_request(
+        "GET", f"{location_name}/media", config,
+        params={"pageSize": page_size}, tool=tool,
+    )
 
     items = result.get("mediaItems", [])
     if category:
@@ -331,22 +322,11 @@ def reply_to_review(
     reply_text: str,
     tool: str | None = None,
 ) -> dict[str, Any]:
-    """Post or update a reply to a review."""
-    service = _build_service("mybusinessreviews", "v1", config, tool=tool)
-    try:
-        result = service.locations().reviews().updateReply(
-            name=review_resource_name,
-            body={"comment": reply_text},
-        ).execute()
-    except Exception as exc:
-        raise AdsMcpError(
-            status_code=502,
-            error_code="UPSTREAM_ERROR",
-            message="GBP review reply failed.",
-            tool=tool,
-            retryable=True,
-            details={"reason": str(exc)},
-        ) from exc
+    """Post or update a reply to a review (v4: PUT {review}/reply)."""
+    result = _v4_request(
+        "PUT", f"{review_resource_name}/reply", config,
+        body={"comment": reply_text}, tool=tool,
+    )
     return {
         "reviewResourceName": review_resource_name,
         "replyText": result.get("comment", reply_text),
@@ -360,20 +340,29 @@ def delete_review_reply(
     review_resource_name: str,
     tool: str | None = None,
 ) -> dict[str, Any]:
-    """Delete the reply on a review."""
-    service = _build_service("mybusinessreviews", "v1", config, tool=tool)
-    try:
-        service.locations().reviews().deleteReply(name=review_resource_name).execute()
-    except Exception as exc:
-        raise AdsMcpError(
-            status_code=502,
-            error_code="UPSTREAM_ERROR",
-            message="GBP review reply deletion failed.",
-            tool=tool,
-            retryable=True,
-            details={"reason": str(exc)},
-        ) from exc
+    """Delete the reply on a review (v4: DELETE {review}/reply)."""
+    _v4_request("DELETE", f"{review_resource_name}/reply", config, tool=tool)
     return {"reviewResourceName": review_resource_name, "deleted": True}
+
+
+_SPANISH_HINTS = {
+    "el", "la", "los", "las", "de", "del", "que", "para", "con", "por", "una", "un",
+    "su", "sus", "y", "es", "en", "nuestra", "nuestro", "mariachi", "canciones",
+}
+_ENGLISH_HINTS = {
+    "the", "and", "for", "with", "your", "our", "you", "to", "of", "is", "on", "we",
+}
+
+
+def detect_language_code(text: str) -> str:
+    """Best-effort 'es' vs 'en' for a post body. Spanish punctuation/accents win;
+    otherwise compare common-word hits. Defaults to 'en'."""
+    if any(ch in text for ch in "¿¡ñÑ"):
+        return "es"
+    words = [w.strip(".,!?:;()\"'").lower() for w in text.split()]
+    es = sum(w in _SPANISH_HINTS for w in words) + sum(ch in "áéíóú" for ch in text.lower())
+    en = sum(w in _ENGLISH_HINTS for w in words)
+    return "es" if es > en else "en"
 
 
 def create_post(
@@ -388,11 +377,14 @@ def create_post(
     event_end_date: str | None = None,
     offer_coupon_code: str | None = None,
     offer_redeem_online_url: str | None = None,
-    language_code: str = "en",
+    language_code: str | None = None,
     tool: str | None = None,
 ) -> dict[str, Any]:
-    """Create a new local post on the GBP listing."""
+    """Create a new local post on the GBP listing.
+
+    language_code defaults to auto-detection ('es' or 'en') from the summary."""
     location_name = get_location_name(config, tool=tool)
+    language_code = language_code or detect_language_code(summary)
 
     body: dict[str, Any] = {
         "languageCode": language_code,
@@ -424,7 +416,7 @@ def create_post(
         if offer:
             body["offer"] = offer
 
-    result = _postings_request(
+    result = _v4_request(
         "POST", f"{location_name}/localPosts",
         config, body=body, tool=tool,
     )
@@ -448,7 +440,7 @@ def delete_post(
     """Delete a local post."""
     # post_resource_name is e.g. "locations/123/localPosts/456" — use it as the path directly
     path = post_resource_name.split("v1/")[-1] if "v1/" in post_resource_name else post_resource_name
-    _postings_request("DELETE", path, config, tool=tool)
+    _v4_request("DELETE", path, config, tool=tool)
     return {"postResourceName": post_resource_name, "deleted": True}
 
 
@@ -473,31 +465,51 @@ def upload_photo(
             tool=tool,
         )
 
+    import requests
+
     mime_type = mimetypes.guess_type(str(path))[0] or "image/jpeg"
-    service = _build_service("mybusinessmedia", "v1", config, tool=tool)
     location_name = get_location_name(config, tool=tool)
 
-    try:
-        from googleapiclient.http import MediaFileUpload
-
-        media_body = MediaFileUpload(str(path), mimetype=mime_type, resumable=True)
-        result = service.locations().media().create(
-            parent=location_name,
-            body={
-                "mediaFormat": "PHOTO",
-                "locationAssociation": {"category": category},
-            },
-            media_body=media_body,
-        ).execute()
-    except Exception as exc:
+    # v4 byte upload is three steps: startUpload -> upload bytes -> create media item.
+    start = _v4_request("POST", f"{location_name}/media:startUpload", config, body={}, tool=tool)
+    data_ref = start.get("resourceName")
+    if not data_ref:
         raise AdsMcpError(
             status_code=502,
             error_code="UPSTREAM_ERROR",
-            message="GBP photo upload failed.",
+            message="GBP photo upload failed: startUpload returned no resourceName.",
             tool=tool,
             retryable=True,
-            details={"reason": str(exc)},
-        ) from exc
+        )
+
+    upload_url = f"https://mybusiness.googleapis.com/upload/v1/media/{data_ref}?upload_type=media"
+    resp = requests.post(
+        upload_url,
+        headers={
+            "Authorization": f"Bearer {_access_token(config, tool=tool)}",
+            "Content-Type": mime_type,
+        },
+        data=path.read_bytes(),
+        timeout=120,
+    )
+    if not resp.ok:
+        raise AdsMcpError(
+            status_code=502,
+            error_code="UPSTREAM_ERROR",
+            message=f"GBP photo byte upload failed: {resp.status_code} — {resp.text[:300]}",
+            tool=tool,
+            retryable=resp.status_code >= 500,
+        )
+
+    result = _v4_request(
+        "POST", f"{location_name}/media", config,
+        body={
+            "mediaFormat": "PHOTO",
+            "locationAssociation": {"category": category},
+            "dataRef": {"resourceName": data_ref},
+        },
+        tool=tool,
+    )
 
     return {
         "resourceName": result.get("name"),
@@ -514,19 +526,8 @@ def delete_media(
     media_resource_name: str,
     tool: str | None = None,
 ) -> dict[str, Any]:
-    """Delete a photo or video from the listing."""
-    service = _build_service("mybusinessmedia", "v1", config, tool=tool)
-    try:
-        service.locations().media().delete(name=media_resource_name).execute()
-    except Exception as exc:
-        raise AdsMcpError(
-            status_code=502,
-            error_code="UPSTREAM_ERROR",
-            message="GBP media deletion failed.",
-            tool=tool,
-            retryable=True,
-            details={"reason": str(exc)},
-        ) from exc
+    """Delete a photo or video from the listing (v4: DELETE {media name})."""
+    _v4_request("DELETE", media_resource_name, config, tool=tool)
     return {"mediaResourceName": media_resource_name, "deleted": True}
 
 

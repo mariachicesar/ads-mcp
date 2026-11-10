@@ -908,6 +908,7 @@ def update_campaign_bidding_strategy(request, request_id: str | None) -> dict:
     bidding_strategy = (payload.get("biddingStrategy") or "").upper()
     target_cpa_micros = payload.get("targetCpaMicros")
     target_roas = payload.get("targetRoas")
+    max_cpc_micros = payload.get("maxCpcMicros")
 
     if not campaign_name:
         raise AdsMcpError(
@@ -943,6 +944,8 @@ def update_campaign_bidding_strategy(request, request_id: str | None) -> dict:
         after_value["targetCpaMicros"] = int(target_cpa_micros)
     if target_roas:
         after_value["targetRoas"] = float(target_roas)
+    if max_cpc_micros:
+        after_value["maxCpcMicros"] = int(max_cpc_micros)
 
     changes = [
         build_change(
@@ -995,6 +998,7 @@ def update_campaign_bidding_strategy(request, request_id: str | None) -> dict:
         bidding_strategy=bidding_strategy,
         target_cpa_micros=int(target_cpa_micros) if target_cpa_micros else None,
         target_roas=float(target_roas) if target_roas else None,
+        max_cpc_micros=int(max_cpc_micros) if max_cpc_micros else None,
         tool="update_campaign_bidding_strategy",
     )
 

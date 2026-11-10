@@ -800,6 +800,7 @@ def mutate_campaign_bidding_strategy(
     bidding_strategy: str,
     target_cpa_micros: int | None = None,
     target_roas: float | None = None,
+    max_cpc_micros: int | None = None,
     tool: str | None = None,
 ) -> dict[str, Any]:
     client = build_google_ads_client(config, tool=tool)
@@ -813,8 +814,16 @@ def mutate_campaign_bidding_strategy(
         campaign.resource_name = campaign_resource_name
 
         strategy = bidding_strategy.upper()
+        extra_mask_paths: list[str] = []
         if strategy == "MAXIMIZE_CLICKS":
-            campaign.maximize_clicks.CopyFrom(client.get_type("MaximizeClicks"))
+            # The Google Ads API has no `maximize_clicks` field: Maximize Clicks
+            # is the TargetSpend strategy, with an optional max CPC ceiling.
+            ts = client.get_type("TargetSpend")
+            if max_cpc_micros:
+                ts.cpc_bid_ceiling_micros = int(max_cpc_micros)
+            else:
+                extra_mask_paths.append("target_spend")
+            campaign.target_spend.CopyFrom(ts)
         elif strategy == "MAXIMIZE_CONVERSIONS":
             campaign.maximize_conversions.CopyFrom(client.get_type("MaximizeConversions"))
         elif strategy == "TARGET_CPA":
@@ -841,6 +850,11 @@ def mutate_campaign_bidding_strategy(
             operation.update_mask,
             protobuf_helpers.field_mask(None, campaign._pb),
         )
+        # An empty strategy message (TargetSpend with no ceiling) adds no
+        # paths to the auto-generated mask, so add the strategy field itself.
+        for path in extra_mask_paths:
+            if path not in operation.update_mask.paths:
+                operation.update_mask.paths.append(path)
         response = campaign_service.mutate_campaigns(
             customer_id=customer_id,
             operations=[operation],

@@ -453,6 +453,7 @@ def google_ads_update_campaign_bidding_strategy(
     bidding_strategy: Annotated[str, Field(description="Strategy: MAXIMIZE_CLICKS, MAXIMIZE_CONVERSIONS, TARGET_CPA, TARGET_ROAS, or MANUAL_CPC")],
     target_cpa_micros: Annotated[int | None, Field(description="Target CPA in micros (e.g. 50000000 = $50). Required for TARGET_CPA.")] = None,
     target_roas: Annotated[float | None, Field(description="Target ROAS as a multiplier (e.g. 4.0 = 400%). Required for TARGET_ROAS.")] = None,
+    max_cpc_micros: Annotated[int | None, Field(description="MAXIMIZE_CLICKS only: max CPC bid limit in micros (e.g. 3000000 = $3).")] = None,
     dry_run: Annotated[bool, Field(description="If true, shows proposed changes without applying them. Always use true first.")] = True,
     approval_id: Annotated[str | None, Field(description="Required for execute mode (dry_run=false). Copy from the dry-run response.")] = None,
 ) -> dict:
@@ -467,6 +468,8 @@ def google_ads_update_campaign_bidding_strategy(
         payload["targetCpaMicros"] = target_cpa_micros
     if target_roas:
         payload["targetRoas"] = target_roas
+    if max_cpc_micros:
+        payload["maxCpcMicros"] = max_cpc_micros
     req = ToolRequest(businessKey=business_key, dryRun=dry_run, approvalId=approval_id, payload=payload)
     return _run_tool(
         "google_ads_update_campaign_bidding_strategy",
