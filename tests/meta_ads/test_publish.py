@@ -232,3 +232,44 @@ def test_schedule_page_reel_dry_run_makes_no_calls(reel_env, fixed_now, tmp_path
     assert dry["approvalId"]
     assert [s["step"] for s in dry["data"]["graphRequests"]] == [1, 2, 3]
     assert reel_env["calls"] == []
+
+
+# ── list_scheduled_page_videos + registration ────────────────────────────────
+
+
+def test_list_scheduled_page_videos_filters_and_converts(publish_env, monkeypatch):
+    rows = [
+        {"id": "v1", "title": "keep", "published": False, "scheduled_publish_time": NOON_NOV12_PT},
+        {"id": "v2", "title": "live", "published": True},
+        {"id": "v3", "title": "draft", "published": False},
+    ]
+
+    def graph_request(config, method, path, *, params=None, access_token=None, tool=None, **kw):
+        assert (method, path, access_token) == ("GET", "999/videos", "page-tok")
+        return {"data": rows}
+
+    monkeypatch.setattr(publish, "_graph_request", graph_request)
+    r = publish.list_scheduled_page_videos(_req({}), None)
+
+    assert r["mode"] == "read"
+    assert [v["id"] for v in r["data"]["videos"]] == ["v1"]
+    assert r["data"]["videos"][0]["scheduledPacific"] == "2026-11-12T12:00:00-08:00"
+
+
+def test_list_scheduled_page_videos_blocks_other_page(publish_env):
+    with pytest.raises(AdsMcpError):
+        publish.list_scheduled_page_videos(_req({"pageId": "555"}), None)
+
+
+def test_http_routes_registered():
+    main = load_service_module("meta-ads", "main")
+    paths = {r.path for r in main.app.routes}
+    assert {"/tools/upload_ad_video", "/tools/schedule_page_video",
+            "/tools/schedule_page_reel", "/tools/list_scheduled_page_videos"} <= paths
+
+
+def test_mcp_tools_registered():
+    server = load_service_module("meta-ads", "mcp_server")
+    for name in ("meta_ads_upload_ad_video", "meta_ads_schedule_page_video",
+                 "meta_ads_schedule_page_reel", "meta_ads_list_scheduled_page_videos"):
+        assert hasattr(server, name)

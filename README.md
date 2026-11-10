@@ -380,6 +380,23 @@ Posts queued via `gbp_create_post` with a `scheduled_time` live in `servers/gbp/
 
 ---
 
+### Meta video publishing (Facebook Page + ad library)
+
+The meta-ads server can upload ad videos and schedule Facebook Page videos and Reels. Facebook holds scheduled posts itself, so there is no queue or cron for these (Instagram scheduling is not supported yet).
+
+| Tool | What it does |
+|------|--------------|
+| `meta_ads_upload_ad_video` | Uploads a video to the ad account's Media library (`advideos`) and returns its video ID |
+| `meta_ads_schedule_page_video` | Schedules a Page video post (`published=false` + `scheduled_publish_time`) |
+| `meta_ads_schedule_page_reel` | Schedules a Page Reel (start → upload → finish with `video_state=SCHEDULED`) |
+| `meta_ads_list_scheduled_page_videos` | Lists scheduled, not-yet-published Page videos/Reels |
+
+- Source: exactly one of `file_path` (`.mp4`/`.mov`, max 1 GiB, readable by the server process) or `file_url` (public `https://`).
+- Times: ISO 8601; a time without an offset is Pacific (`America/Los_Angeles`). Must be 10 minutes to 75 days out, otherwise the dry run is blocked.
+- Only the configured `page_id` can be posted to.
+- Write tools use the usual dry run → `approvalId` flow. For local files the approval is bound to the file's SHA-256, so editing the file after the dry run invalidates the approval.
+- The Meta user token needs `pages_manage_posts`, `pages_read_engagement` and `pages_show_list` (plus the ads permissions). The Page token is fetched per call and never stored. Cancel or edit scheduled posts in Meta Business Suite.
+
 ## Docs
 
 - `CLAUDE.md` — source of truth for all agents and MCP servers

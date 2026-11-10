@@ -33,6 +33,7 @@ from tools.read import (
     list_creative_assets,
 )
 from tools.write import create_ad, create_adset, create_campaign, update_adset_schedule, update_budget, update_status
+from tools.publish import list_scheduled_page_videos, schedule_page_reel, schedule_page_video, upload_ad_video
 
 mcp = FastMCP(
     name="meta-ads",
@@ -152,6 +153,81 @@ def meta_ads_update_adset_schedule(
         "adsetId": adset_id, "cloneScheduleFromAdsetId": clone_schedule_from_adset_id, "schedule": schedule,
     })
     return _run_tool("update_adset_schedule", lambda: update_adset_schedule(request, None))
+
+
+_FILE_PATH = Annotated[str | None, Field(description="Local .mp4/.mov file readable by this server (max 1 GiB); use file_path OR file_url")]
+_FILE_URL = Annotated[str | None, Field(description="Public https:// URL Meta fetches the video from; use file_path OR file_url")]
+_WHEN = Annotated[str, Field(description="ISO 8601 publish time; naive = America/Los_Angeles. 10 minutes to 75 days from now")]
+_PAGE = Annotated[str | None, Field(description="Defaults to the configured Page; other Pages are blocked")]
+
+
+@mcp.tool()
+def meta_ads_upload_ad_video(
+    business_key: _BK,
+    name: Annotated[str, Field(description="Video name in the ad Media library")],
+    file_path: _FILE_PATH = None,
+    file_url: _FILE_URL = None,
+    approval_id: _APPROVAL = None,
+) -> dict:
+    """Upload a video to the ad account's Media library (advideos); returns its video ID.
+
+    IMPORTANT: Call without approval_id first and show the dry-run preview.
+    Only call again with approval_id after the user explicitly approves.
+    """
+    request = _write_request(business_key, approval_id, {"name": name, "filePath": file_path, "fileUrl": file_url})
+    return _run_tool("upload_ad_video", lambda: upload_ad_video(request, None))
+
+
+@mcp.tool()
+def meta_ads_schedule_page_video(
+    business_key: _BK,
+    scheduled_time: _WHEN,
+    description: Annotated[str, Field(description="Post text")],
+    file_path: _FILE_PATH = None,
+    file_url: _FILE_URL = None,
+    title: Annotated[str | None, Field(description="Optional video title")] = None,
+    page_id: _PAGE = None,
+    approval_id: _APPROVAL = None,
+) -> dict:
+    """Schedule a Facebook Page video post; Facebook publishes it at scheduled_time.
+
+    IMPORTANT: Call without approval_id first and show the dry-run preview.
+    Only call again with approval_id after the user explicitly approves.
+    """
+    request = _write_request(business_key, approval_id, {
+        "scheduledTime": scheduled_time, "description": description, "filePath": file_path,
+        "fileUrl": file_url, "title": title, "pageId": page_id,
+    })
+    return _run_tool("schedule_page_video", lambda: schedule_page_video(request, None))
+
+
+@mcp.tool()
+def meta_ads_schedule_page_reel(
+    business_key: _BK,
+    scheduled_time: _WHEN,
+    description: Annotated[str, Field(description="Reel caption")],
+    file_path: _FILE_PATH = None,
+    file_url: _FILE_URL = None,
+    page_id: _PAGE = None,
+    approval_id: _APPROVAL = None,
+) -> dict:
+    """Schedule a Facebook Page Reel; Facebook publishes it at scheduled_time.
+
+    IMPORTANT: Call without approval_id first and show the dry-run preview.
+    Only call again with approval_id after the user explicitly approves.
+    """
+    request = _write_request(business_key, approval_id, {
+        "scheduledTime": scheduled_time, "description": description, "filePath": file_path,
+        "fileUrl": file_url, "pageId": page_id,
+    })
+    return _run_tool("schedule_page_reel", lambda: schedule_page_reel(request, None))
+
+
+@mcp.tool()
+def meta_ads_list_scheduled_page_videos(business_key: _BK, page_id: _PAGE = None) -> dict:
+    """List videos and Reels scheduled (not yet published) on the Facebook Page."""
+    request = ToolRequest(businessKey=business_key, payload={"pageId": page_id} if page_id else {})
+    return _run_tool("list_scheduled_page_videos", lambda: list_scheduled_page_videos(request, None))
 
 
 @mcp.tool()

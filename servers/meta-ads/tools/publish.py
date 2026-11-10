@@ -25,9 +25,9 @@ from shared.meta_ads_client import (
     upload_reel_bytes,
 )
 from shared.models import ToolRequest
-from shared.responses import build_change, build_rule_check
+from shared.responses import build_change, build_rule_check, build_success_response
 from shared.runtime_config import load_meta_ads_config
-from tools.write import _invalid, _required, _write_flow
+from tools.write import SERVICE_NAME, _invalid, _required, _write_flow
 
 MAX_VIDEO_BYTES = 1_073_741_824  # 1 GiB: Meta's non-resumable upload limit
 VIDEO_EXTENSIONS = {".mp4", ".mov"}
@@ -224,4 +224,27 @@ def schedule_page_reel(request: ToolRequest, request_id: str | None) -> dict:
         dry_summary=f"Would schedule a Reel on Page {page_id} for {_describe_time(when)}.",
         done_summary=f"Scheduled a Reel on Page {page_id} for {_describe_time(when)}.",
         execute=execute, bound_args=_bound(request, sha),
+    )
+
+
+def list_scheduled_page_videos(request: ToolRequest, request_id: str | None) -> dict:
+    tool = "list_scheduled_page_videos"
+    config = load_meta_ads_config(business_key=request.businessKey, tool=tool)
+    page_id = str(request.payload.get("pageId") or config.get("page_id"))
+    if page_id != str(config.get("page_id")):
+        raise _invalid(f"Page {page_id} is not the configured Page {config.get('page_id')}.", tool)
+
+    page_token = get_page_access_token(config, page_id=page_id, tool=tool)
+    rows = _graph_request(config, "GET", f"{page_id}/videos", access_token=page_token, tool=tool, params={
+        "fields": "id,title,description,scheduled_publish_time,published,created_time", "limit": "100",
+    }).get("data", [])
+    videos = [
+        {**row, "scheduledPacific": datetime.fromtimestamp(int(row["scheduled_publish_time"]), SCHEDULE_TZ).isoformat()}
+        for row in rows
+        if row.get("published") is False and row.get("scheduled_publish_time")
+    ]
+    videos.sort(key=lambda v: int(v["scheduled_publish_time"]))
+    return build_success_response(
+        service=SERVICE_NAME, tool=tool, mode="read", business_key=request.businessKey, request_id=request_id,
+        summary=f"{len(videos)} scheduled video(s) on Page {page_id}.", data={"pageId": page_id, "videos": videos},
     )

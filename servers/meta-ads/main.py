@@ -18,6 +18,7 @@ from tools.read import (
     list_creative_assets,
 )
 from tools.write import create_ad, create_adset, create_campaign, update_adset_schedule, update_budget, update_status
+from tools.publish import list_scheduled_page_videos, schedule_page_reel, schedule_page_video, upload_ad_video
 from shared.auth import SignedRequestMiddleware
 from shared.errors import AdsMcpError
 from shared.models import ToolRequest
@@ -108,6 +109,26 @@ def tool_update_budget(request: ToolRequest, http_request: Request) -> dict:
 @app.post("/tools/update_adset_schedule")
 def tool_update_adset_schedule(request: ToolRequest, http_request: Request) -> dict:
     return update_adset_schedule(request, _request_id(http_request))
+
+
+@app.post("/tools/upload_ad_video")
+def tool_upload_ad_video(request: ToolRequest, http_request: Request) -> dict:
+    return upload_ad_video(request, _request_id(http_request))
+
+
+@app.post("/tools/schedule_page_video")
+def tool_schedule_page_video(request: ToolRequest, http_request: Request) -> dict:
+    return schedule_page_video(request, _request_id(http_request))
+
+
+@app.post("/tools/schedule_page_reel")
+def tool_schedule_page_reel(request: ToolRequest, http_request: Request) -> dict:
+    return schedule_page_reel(request, _request_id(http_request))
+
+
+@app.post("/tools/list_scheduled_page_videos")
+def tool_list_scheduled_page_videos(request: ToolRequest, http_request: Request) -> dict:
+    return list_scheduled_page_videos(request, _request_id(http_request))
 
 
 @app.post("/tools/create_campaign")
