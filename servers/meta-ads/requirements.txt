@@ -4,3 +4,4 @@ boto3>=1.35.0
 facebook-business>=22.0.0
 pydantic>=2.9.0
 redis>=5.2.0
+tzdata>=2024.1  # zoneinfo needs it on Windows; Linux uses system tzdata
