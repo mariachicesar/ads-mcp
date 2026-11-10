@@ -34,6 +34,7 @@ from tools.read import (
 )
 from tools.write import create_ad, create_adset, create_campaign, update_adset_schedule, update_budget, update_status
 from tools.publish import list_scheduled_page_videos, schedule_page_reel, schedule_page_video, upload_ad_video
+from tools.instagram import cancel_scheduled_social, list_scheduled_social, schedule_instagram_reel
 
 mcp = FastMCP(
     name="meta-ads",
@@ -228,6 +229,50 @@ def meta_ads_list_scheduled_page_videos(business_key: _BK, page_id: _PAGE = None
     """List videos and Reels scheduled (not yet published) on the Facebook Page."""
     request = ToolRequest(businessKey=business_key, payload={"pageId": page_id} if page_id else {})
     return _run_tool("list_scheduled_page_videos", lambda: list_scheduled_page_videos(request, None))
+
+
+@mcp.tool()
+def meta_ads_schedule_instagram_reel(
+    business_key: _BK,
+    file_path: Annotated[str, Field(description="Local .mp4/.mov file readable by this server (max 1 GiB)")],
+    scheduled_time: _WHEN,
+    caption: Annotated[str, Field(description="Reel caption (max 2,200 characters, 30 hashtags)")],
+    approval_id: _APPROVAL = None,
+) -> dict:
+    """Schedule an Instagram Reel. The video is stored in S3 and a timer publishes it up to 30 minutes after scheduled_time.
+
+    IMPORTANT: Call without approval_id first and show the dry-run preview.
+    Only call again with approval_id after the user explicitly approves.
+    """
+    request = _write_request(business_key, approval_id, {
+        "filePath": file_path, "scheduledTime": scheduled_time, "caption": caption,
+    })
+    return _run_tool("schedule_instagram_reel", lambda: schedule_instagram_reel(request, None))
+
+
+@mcp.tool()
+def meta_ads_list_scheduled_social(
+    business_key: _BK,
+    states: Annotated[list[str] | None, Field(description="Queue states to include: pending, processing, done, failed, cancelled (default pending, processing, failed)")] = None,
+) -> dict:
+    """List queued Instagram/TikTok posts (S3 queue), with their state and Pacific time."""
+    request = ToolRequest(businessKey=business_key, payload={"states": states} if states else {})
+    return _run_tool("list_scheduled_social", lambda: list_scheduled_social(request, None))
+
+
+@mcp.tool()
+def meta_ads_cancel_scheduled_social(
+    business_key: _BK,
+    entry_id: Annotated[str, Field(description="Queue entry id from meta_ads_list_scheduled_social")],
+    approval_id: _APPROVAL = None,
+) -> dict:
+    """Cancel a pending queued Instagram/TikTok post.
+
+    IMPORTANT: Call without approval_id first and show the dry-run preview.
+    Only call again with approval_id after the user explicitly approves.
+    """
+    request = _write_request(business_key, approval_id, {"entryId": entry_id})
+    return _run_tool("cancel_scheduled_social", lambda: cancel_scheduled_social(request, None))
 
 
 @mcp.tool()

@@ -333,6 +333,15 @@ def get_page_access_token(config: dict[str, Any], *, page_id: str, tool: str | N
     return str(token)
 
 
+def get_instagram_user_id(config: dict[str, Any], *, page_id: str, tool: str | None = None) -> str | None:
+    """The Instagram professional account linked to the Page (config instagram_user_id wins), or None."""
+    if config.get("instagram_user_id"):
+        return str(config["instagram_user_id"])
+    row = _graph_request(config, "GET", page_id, params={"fields": "instagram_business_account"}, tool=tool)
+    account = row.get("instagram_business_account") or {}
+    return str(account["id"]) if account.get("id") else None
+
+
 def post_video(
     config: dict[str, Any], *, path: str, fields: dict[str, Any],
     file_path: str | None, file_url: str | None,

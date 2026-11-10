@@ -125,3 +125,16 @@ def test_get_page_access_token_oauth_error_names_permission(fake_requests):
     assert exc.value.error_code == "UPSTREAM_ERROR"
     assert "pages_manage_posts" in exc.value.message
     assert exc.value.details["code"] == 200
+
+
+def test_get_instagram_user_id_prefers_config(fake_requests):
+    assert meta_ads_client.get_instagram_user_id({**CONFIG, "instagram_user_id": "178"}, page_id="999") == "178"
+    assert fake_requests.calls == []
+
+
+def test_get_instagram_user_id_from_page_or_none(fake_requests):
+    fake_requests.bodies.append((200, {"id": "999", "instagram_business_account": {"id": "17841"}}))
+    fake_requests.bodies.append((200, {"id": "999"}))
+
+    assert meta_ads_client.get_instagram_user_id(CONFIG, page_id="999") == "17841"
+    assert meta_ads_client.get_instagram_user_id(CONFIG, page_id="999") is None
