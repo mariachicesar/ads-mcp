@@ -129,7 +129,11 @@ def _write_flow(
     rule_checks: list[dict[str, Any]], changes: list[dict[str, Any]],
     preview: dict[str, Any], dry_summary: str, done_summary: str,
     execute: Callable[[], dict[str, Any]],
+    bound_args: dict[str, Any] | None = None,
 ) -> dict:
+    # bound_args lets a tool bind the approval to more than its raw arguments
+    # (e.g. the SHA-256 of a local file), so a changed file fails verification.
+    approval_args = request.payload if bound_args is None else bound_args
     blocked = any(not check["passed"] for check in rule_checks)
 
     if not request.approvalId:
@@ -140,13 +144,13 @@ def _write_flow(
             rule_checks=rule_checks, changes=changes, data=preview,
             requires_confirmation=not blocked, executed=False,
             approval=None if blocked else issue_approval(
-                service=SERVICE_NAME, tool=tool, business_key=request.businessKey, args=request.payload,
+                service=SERVICE_NAME, tool=tool, business_key=request.businessKey, args=approval_args,
             ),
         )
 
     verify_approval(
         approval_id=request.approvalId, service=SERVICE_NAME, tool=tool,
-        business_key=request.businessKey, args=request.payload,
+        business_key=request.businessKey, args=approval_args,
     )
     if blocked:
         raise AdsMcpError(
