@@ -177,3 +177,58 @@ def test_schedule_page_video_execute_uses_page_token(publish_env, fixed_now, tmp
     assert publish_env["tokens"] == ["page-tok"]
     assert publish_env["posts"][0][0] == "999/videos"
     assert done["data"]["result"] == {"videoId": "new-video"}
+
+
+# ── schedule_page_reel ───────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def reel_env(publish_env, monkeypatch):
+    publish_env["finish_error"] = None
+
+    def graph_request(config, method, path, *, params=None, data=None, access_token=None, tool=None, **kw):
+        assert path == "999/video_reels" and access_token == "page-tok"
+        if data["upload_phase"] == "start":
+            publish_env["calls"].append("start")
+            return {"video_id": "vid1", "upload_url": "https://rupload.facebook.com/video-upload/v23.0/vid1"}
+        publish_env["calls"].append(f"finish:{data['video_id']}:{data['video_state']}:{data['scheduled_publish_time']}")
+        if publish_env["finish_error"]:
+            raise publish_env["finish_error"]
+        return {"success": True}
+
+    def upload_reel_bytes(config, *, video_id, access_token, file_path, file_url, tool=None):
+        publish_env["calls"].append(f"upload:{video_id}")
+        return {"success": True}
+
+    monkeypatch.setattr(publish, "_graph_request", graph_request)
+    monkeypatch.setattr(publish, "upload_reel_bytes", upload_reel_bytes)
+    return publish_env
+
+
+def test_schedule_page_reel_calls_start_upload_finish_in_order(reel_env, fixed_now, tmp_path):
+    payload = _sched(tmp_path)
+    dry = publish.schedule_page_reel(_req(payload), None)
+    done = publish.schedule_page_reel(_req(payload, dry["approvalId"]), None)
+
+    assert reel_env["calls"] == ["token:999", "start", "upload:vid1", f"finish:vid1:SCHEDULED:{NOON_NOV12_PT}"]
+    assert done["data"]["result"]["videoId"] == "vid1"
+
+
+def test_schedule_page_reel_finish_failure_reports_video_id(reel_env, fixed_now, tmp_path):
+    reel_env["finish_error"] = AdsMcpError(status_code=502, error_code="UPSTREAM_ERROR", message="boom", tool="t")
+    payload = _sched(tmp_path)
+    dry = publish.schedule_page_reel(_req(payload), None)
+
+    with pytest.raises(AdsMcpError) as exc:
+        publish.schedule_page_reel(_req(payload, dry["approvalId"]), None)
+
+    assert exc.value.details["videoId"] == "vid1"
+    assert exc.value.details["note"] == "Reel bytes were uploaded but the reel was not scheduled."
+
+
+def test_schedule_page_reel_dry_run_makes_no_calls(reel_env, fixed_now, tmp_path):
+    dry = publish.schedule_page_reel(_req(_sched(tmp_path)), None)
+
+    assert dry["approvalId"]
+    assert [s["step"] for s in dry["data"]["graphRequests"]] == [1, 2, 3]
+    assert reel_env["calls"] == []

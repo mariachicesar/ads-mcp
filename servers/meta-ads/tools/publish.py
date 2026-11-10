@@ -15,7 +15,15 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from shared.meta_ads_client import configured_account_id, get_page_access_token, post_video
+from shared.errors import AdsMcpError
+from shared.meta_ads_client import (
+    RUPLOAD_URL,
+    _graph_request,
+    configured_account_id,
+    get_page_access_token,
+    post_video,
+    upload_reel_bytes,
+)
 from shared.models import ToolRequest
 from shared.responses import build_change, build_rule_check
 from shared.runtime_config import load_meta_ads_config
@@ -167,5 +175,53 @@ def schedule_page_video(request: ToolRequest, request_id: str | None) -> dict:
                  "graphRequest": {"method": "POST", "path": path, "fields": fields}},
         dry_summary=f"Would schedule a video on Page {page_id} for {_describe_time(when)}.",
         done_summary=f"Scheduled a video on Page {page_id} for {_describe_time(when)}.",
+        execute=execute, bound_args=_bound(request, sha),
+    )
+
+
+def schedule_page_reel(request: ToolRequest, request_id: str | None) -> dict:
+    tool = "schedule_page_reel"
+    payload = request.payload
+    description = _required(payload, "description", tool)
+    when = _parse_schedule_time(_required(payload, "scheduledTime", tool), tool)
+    source, sha = _video_source(payload, tool)
+
+    config = load_meta_ads_config(business_key=request.businessKey, tool=tool)
+    page_id = str(payload.get("pageId") or config.get("page_id"))
+    path = f"{page_id}/video_reels"
+    finish = {"upload_phase": "finish", "video_state": "SCHEDULED",
+              "scheduled_publish_time": int(when.timestamp()), "description": description}
+    file = _file_preview(source, sha)
+    rule_checks = [_page_check(config, page_id), _schedule_window_check(when)]
+    changes = [build_change(field="page_reel", label="Scheduled Page Reel", before=None,
+                            after={**finish, "file": file}, resource_type="page_reel")]
+
+    def execute() -> dict[str, Any]:
+        page_token = get_page_access_token(config, page_id=page_id, tool=tool)
+        start = _graph_request(config, "POST", path, data={"upload_phase": "start"}, access_token=page_token, tool=tool)
+        video_id = str(start.get("video_id"))
+        upload_reel_bytes(config, video_id=video_id, access_token=page_token,
+                          file_path=source.get("filePath"), file_url=source.get("fileUrl"), tool=tool)
+        try:
+            done = _graph_request(config, "POST", path, data={**finish, "video_id": video_id},
+                                  access_token=page_token, tool=tool)
+        except AdsMcpError as exc:
+            exc.details = {**exc.details, "videoId": video_id,
+                           "note": "Reel bytes were uploaded but the reel was not scheduled."}
+            raise
+        return {"videoId": video_id, "finish": done}
+
+    return _write_flow(
+        request, request_id, tool=tool, rule_checks=rule_checks, changes=changes,
+        preview={
+            "file": file, "scheduledFor": _describe_time(when),
+            "graphRequests": [
+                {"step": 1, "method": "POST", "path": path, "fields": {"upload_phase": "start"}},
+                {"step": 2, "method": "POST", "path": f"{RUPLOAD_URL}/<version>/<video_id from step 1>", "fields": file},
+                {"step": 3, "method": "POST", "path": path, "fields": {**finish, "video_id": "<from step 1>"}},
+            ],
+        },
+        dry_summary=f"Would schedule a Reel on Page {page_id} for {_describe_time(when)}.",
+        done_summary=f"Scheduled a Reel on Page {page_id} for {_describe_time(when)}.",
         execute=execute, bound_args=_bound(request, sha),
     )
