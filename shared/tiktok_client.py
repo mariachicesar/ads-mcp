@@ -99,7 +99,8 @@ def refresh_access_token(config: dict[str, Any], *, secret_id: str) -> str:
                           ).strftime("%Y-%m-%dT%H:%M:%SZ")
         updated = {**config, "refresh_token": new_refresh, "refresh_expires_at": expires_at or config.get("refresh_expires_at")}
         try:
-            secrets.put_secret(secret_id, updated, get_settings())
+            # Update-only: the runner's EC2 role has PutSecretValue, not CreateSecret.
+            secrets.update_secret(secret_id, updated, get_settings())
         except Exception as exc:  # noqa: BLE001 - must not use the token if the rotation was not saved
             raise _error("Could not save TikTok's rotated refresh token; not publishing this run.",
                          retryable=True, reason=type(exc).__name__) from exc

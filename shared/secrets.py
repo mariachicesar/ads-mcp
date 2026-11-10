@@ -97,6 +97,26 @@ def put_secret(secret_id: str, value: Any, settings: Settings) -> None:
     _invalidate_cache(secret_id)
 
 
+def update_secret(secret_id: str, value: Any, settings: Settings) -> None:
+    """Write a new version of an EXISTING secret (needs only secretsmanager:PutSecretValue)."""
+    secret_string = json.dumps(value) if isinstance(value, (dict, list)) else str(value)
+    boto3 = import_module("boto3")
+    client = boto3.client("secretsmanager", region_name=settings.aws_region)
+    try:
+        client.put_secret_value(SecretId=secret_id, SecretString=secret_string)
+    except Exception as exc:  # noqa: BLE001
+        from shared.errors import AdsMcpError
+
+        raise AdsMcpError(
+            status_code=500,
+            error_code="INTERNAL_ERROR",
+            message="Failed to update configuration in secrets store.",
+            details={"reason": type(exc).__name__},
+        ) from exc
+    finally:
+        _invalidate_cache(secret_id)
+
+
 def delete_secret(secret_id: str, settings: Settings) -> None:
     """Delete a secret. No error if it does not exist."""
     boto3 = import_module("boto3")

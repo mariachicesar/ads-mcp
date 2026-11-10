@@ -54,7 +54,7 @@ def test_refresh_unchanged_token_skips_write(fake_tt, fake_secrets):
 def test_refresh_writeback_failure_aborts_publish(fake_tt, monkeypatch):
     def boom(*a, **kw):
         raise RuntimeError("secrets manager down")
-    monkeypatch.setattr(secrets, "put_secret", boom)
+    monkeypatch.setattr(secrets, "update_secret", boom)
 
     with pytest.raises(AdsMcpError) as exc:
         tiktok_client.refresh_access_token(dict(CONFIG), secret_id=SECRET_ID)
@@ -121,3 +121,15 @@ def test_send_to_inbox_init_error_surfaces_tiktok_code(fake_tt):
 
     assert "spam_risk_too_many_pending_share" in exc.value.message
     assert not any(c["method"] == "PUT" for c in fake_tt.calls)
+
+
+def test_refresh_writeback_uses_update_not_create(fake_tt, monkeypatch):
+    updates = []
+
+    def no_create(*a, **kw):
+        raise AssertionError("runner role has PutSecretValue only; must not call put_secret (create)")
+    monkeypatch.setattr(secrets, "put_secret", no_create)
+    monkeypatch.setattr(secrets, "update_secret", lambda sid, value, settings: updates.append((sid, value)))
+
+    assert tiktok_client.refresh_access_token(dict(CONFIG), secret_id=SECRET_ID) == "act.new"
+    assert updates and updates[0][0] == SECRET_ID and updates[0][1]["refresh_token"] == "rft.new"

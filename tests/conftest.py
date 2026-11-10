@@ -26,6 +26,7 @@ def fake_secrets(monkeypatch) -> _FakeSecrets:
     fake = _FakeSecrets()
     monkeypatch.setattr("shared.secrets.get_secret", fake.get_secret)
     monkeypatch.setattr("shared.secrets.put_secret", fake.put_secret)
+    monkeypatch.setattr("shared.secrets.update_secret", fake.put_secret)
     monkeypatch.setattr("shared.secrets.delete_secret", fake.delete_secret)
     # Ensure a region is set so Settings.aws_region is truthy.
     monkeypatch.setenv("AWS_REGION", "us-east-1")

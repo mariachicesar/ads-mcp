@@ -238,7 +238,7 @@ def test_tiktok_refresh_writeback_failure_requeues(fake_s3, tt_ready, monkeypatc
 
     def boom(*a, **kw):
         raise RuntimeError("down")
-    monkeypatch.setattr(secrets, "put_secret", boom)
+    monkeypatch.setattr(secrets, "update_secret", boom)
     _enqueue_tiktok(NOW - timedelta(minutes=5))
 
     runner.run_once(now=NOW, publishers={"tiktok": runner.publish_tiktok_entry})
