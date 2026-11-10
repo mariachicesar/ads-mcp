@@ -44,7 +44,7 @@ ENDSSH
 echo "==> Updating systemd service files"
 $SSH "$REMOTE_HOST" bash -s <<ENDSSH
 set -e
-for f in $REMOTE_DIR/infrastructure/systemd/*.service; do
+for f in $REMOTE_DIR/infrastructure/systemd/*.service $REMOTE_DIR/infrastructure/systemd/*.timer; do
     svc_name=\$(basename "\$f")
     sudo cp "\$f" "/etc/systemd/system/\$svc_name"
 done
@@ -73,6 +73,8 @@ set -e
 for svc in google-ads-mcp meta-ads-mcp analytics-mcp search-console-mcp content-agent gbp-mcp orchestrator-mcp; do
     sudo systemctl restart "\$svc" && echo "  restarted \$svc" || echo "  WARNING: failed to restart \$svc"
 done
+# Scheduled social posts (Instagram) run from a 30-minute timer, not a daemon.
+sudo systemctl enable --now ads-mcp-social.timer && echo "  enabled ads-mcp-social.timer"
 ENDSSH
 
 if [[ "$UPDATE_NGINX" == "true" ]]; then

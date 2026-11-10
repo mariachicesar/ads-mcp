@@ -397,6 +397,22 @@ The meta-ads server can upload ad videos and schedule Facebook Page videos and R
 - Write tools use the usual dry run → `approvalId` flow. For local files the approval is bound to the file's SHA-256, so editing the file after the dry run invalidates the approval.
 - The Meta user token needs `pages_manage_posts`, `pages_read_engagement` and `pages_show_list` (plus the ads permissions). The Page token is fetched per call and never stored. Cancel or edit scheduled posts in Meta Business Suite.
 
+### Instagram scheduled Reels (S3 queue + 30-minute timer)
+
+Instagram's API cannot schedule posts, so the meta-ads server queues them in S3 and `scripts/run-scheduled-social.py` publishes due posts from the `ads-mcp-social.timer` systemd timer **every 30 minutes** (a post goes out up to 30 minutes after its scheduled time).
+
+| Tool | What it does |
+|------|--------------|
+| `meta_ads_schedule_instagram_reel` | Dry run → approvalId; execute uploads the video to S3 and queues the post |
+| `meta_ads_list_scheduled_social` | Lists queued posts (default states: pending, processing, failed) |
+| `meta_ads_cancel_scheduled_social` | Cancels a **pending** post (dry run → approvalId) |
+
+- Bucket: `ADS_MCP_MEDIA_BUCKET` (set in `meta-ads-mcp.service`, `ads-mcp-social.service`, and `.env` for local stdio). Configure it once with `bash infrastructure/configure-media-bucket.sh` (Block Public Access, lifecycle, EC2 role access). Instagram fetches the video through a 1-hour presigned URL.
+- Source: local `.mp4`/`.mov` file (≤ 1 GiB). Caption required, ≤ 2,200 characters and 30 hashtags. Times as for Facebook scheduling (Pacific default, 10 minutes–75 days out).
+- Runner rules: retryable Meta errors retry up to 3 times; posts more than 24 h late fail as missed; an entry stuck in `processing` for over 1 h fails and is **never reposted automatically** — check Instagram, then reschedule if needed.
+- Token needs `instagram_basic` and `instagram_content_publish`; the Instagram account must be a professional account linked to the Page (`instagram_user_id` in the secret).
+- Logs: `/var/log/ads-mcp/scheduled-social.log`. Timer status: `systemctl list-timers ads-mcp-social.timer`.
+
 ## Docs
 
 - `CLAUDE.md` — source of truth for all agents and MCP servers

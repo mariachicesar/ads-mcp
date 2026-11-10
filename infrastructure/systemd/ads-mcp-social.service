@@ -1,0 +1,15 @@
+[Unit]
+Description=ads-mcp scheduled social posts runner (Instagram)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/opt/ads-mcp
+ExecStart=/usr/bin/flock -n /tmp/ads-mcp-social.lock /opt/ads-mcp/.venv/bin/python scripts/run-scheduled-social.py
+StandardOutput=append:/var/log/ads-mcp/scheduled-social.log
+StandardError=append:/var/log/ads-mcp/scheduled-social.log
+Environment=PYTHONUNBUFFERED=1
+Environment=AWS_REGION=us-east-1
+Environment=ADS_MCP_MEDIA_BUCKET=amz-s3-videos-ads-mcp-009959434008-us-east-1-an

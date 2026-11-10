@@ -14,6 +14,7 @@ StandardError=append:/var/log/ads-mcp/meta-ads.log
 Environment=PYTHONUNBUFFERED=1
 Environment=AWS_REGION=us-east-1
 Environment=ADS_MCP_REQUIRE_SIGNED_REQUESTS=true
+Environment=ADS_MCP_MEDIA_BUCKET=amz-s3-videos-ads-mcp-009959434008-us-east-1-an
 
 [Install]
 WantedBy=multi-user.target

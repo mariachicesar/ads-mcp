@@ -9,7 +9,7 @@ or to Secrets Manager, and no secrets need to live in ~/.claude.json.
 
 Reads: META_TOKEN, META_AD_ACCOUNT_ID, META_PAGE_ID, META_APP_ID, META_APP_SECRET,
 META_API_VERSION (default v23.0). Optional: META_BUSINESS_KEY (default el-cuis),
-META_DISPLAY_NAME, ADS_MCP_DOTENV (path to an alternate .env).
+META_DISPLAY_NAME, META_INSTAGRAM_USER_ID, ADS_MCP_MEDIA_BUCKET, ADS_MCP_DOTENV (path to an alternate .env).
 """
 
 from __future__ import annotations
@@ -34,6 +34,13 @@ def _load_env() -> dict[str, str]:
     return values
 
 
+def _dotenv_value(key: str) -> str | None:
+    from dotenv import dotenv_values
+
+    dotenv_path = Path(os.getenv("ADS_MCP_DOTENV") or ROOT / ".env")
+    return dotenv_values(dotenv_path).get(key) if dotenv_path.is_file() else None
+
+
 def main() -> None:
     env = _load_env()
     missing = [k for k in ("META_TOKEN", "META_AD_ACCOUNT_ID", "META_PAGE_ID", "META_APP_ID", "META_APP_SECRET") if not env.get(k)]
@@ -49,6 +56,12 @@ def main() -> None:
         "app_secret": env["META_APP_SECRET"],
         "api_version": env.get("META_API_VERSION", "v23.0"),
     }
+    if env.get("META_INSTAGRAM_USER_ID"):
+        config["instagram_user_id"] = env["META_INSTAGRAM_USER_ID"]
+    # Instagram scheduling stores videos and queue entries in this S3 bucket.
+    dotenv_bucket = env.get("ADS_MCP_MEDIA_BUCKET") or _dotenv_value("ADS_MCP_MEDIA_BUCKET")
+    if dotenv_bucket:
+        os.environ.setdefault("ADS_MCP_MEDIA_BUCKET", dotenv_bucket)
     os.environ["ADS_MCP_META_ADS_CONFIGS_JSON"] = json.dumps({business_key: config})
     # The stored manifest may still have meta-ads disabled; enable it for this process only.
     os.environ["ADS_MCP_CLIENT_MANIFESTS_JSON"] = json.dumps({

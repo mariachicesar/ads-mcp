@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the ads-mcp scheduled social posts runner every 30 minutes
+
+[Timer]
+OnCalendar=*:00/30
+Persistent=true
+Unit=ads-mcp-social.service
+
+[Install]
+WantedBy=timers.target
