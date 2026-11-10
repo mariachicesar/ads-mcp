@@ -186,3 +186,89 @@ def test_non_json_result_is_serialized(fake_s3):
 
     assert counts["published"] == 1
     assert _states(fake_s3)["done"][0]["result"]["at"].startswith("2026-11-12")
+
+
+# ── TikTok publisher ─────────────────────────────────────────────────────────
+
+from tests.fake_tiktok import fake_tt  # noqa: E402,F401  (fixture)
+
+TT_SECRET = "/ads-mcp/el-cuis/tiktok/config"
+
+
+@pytest.fixture
+def tt_ready(fake_s3, fake_tt, fake_secrets):
+    fake_secrets.store[TT_SECRET] = {"client_key": "ck", "client_secret": "cs", "refresh_token": "rft.old",
+                                     "open_id": "oid", "refresh_expires_at": "2027-11-10T00:00:00Z"}
+    fake_s3.objects["videos/el-cuis/t.mp4"] = b"tiktok-video-bytes"
+    return fake_tt
+
+
+def _enqueue_tiktok(when: datetime) -> str:
+    return media_queue.enqueue({"platform": "tiktok", "businessKey": "el-cuis",
+                                "scheduledAt": when.strftime("%Y-%m-%dT%H:%M:%SZ"), "videoKey": "videos/el-cuis/t.mp4",
+                                "videoSha256": "t", "caption": "Serenata 🎺 #mariachi", "options": {}})
+
+
+def test_inbox_status_marks_done_with_note(fake_s3, tt_ready):
+    _enqueue_tiktok(NOW - timedelta(minutes=5))
+
+    counts = runner.run_once(now=NOW, publishers={"tiktok": runner.publish_tiktok_entry})
+
+    done = _states(fake_s3)["done"][0]
+    assert counts["published"] == 1
+    assert done["result"]["publishId"] == "v_inbox_file~v2.123" and done["result"]["status"] == "SEND_TO_USER_INBOX"
+    assert "inbox" in done["result"]["note"] and "Serenata" in done["result"]["note"]
+    put = next(c for c in tt_ready.calls if c["method"] == "PUT")
+    assert put["len"] == len(b"tiktok-video-bytes")
+    assert put["headers"]["Content-Range"] == f"bytes 0-{len(b'tiktok-video-bytes') - 1}/{len(b'tiktok-video-bytes')}"
+
+
+def test_tiktok_failed_status_fails_entry(fake_s3, tt_ready):
+    tt_ready.statuses, tt_ready.fail_reason = ["FAILED"], "duration_check_failed"
+    _enqueue_tiktok(NOW - timedelta(minutes=5))
+
+    counts = runner.run_once(now=NOW, publishers={"tiktok": runner.publish_tiktok_entry})
+
+    assert counts["failed"] == 1
+    assert "duration_check_failed" in _states(fake_s3)["failed"][0]["lastError"]
+
+
+def test_tiktok_refresh_writeback_failure_requeues(fake_s3, tt_ready, monkeypatch):
+    from shared import secrets
+
+    def boom(*a, **kw):
+        raise RuntimeError("down")
+    monkeypatch.setattr(secrets, "put_secret", boom)
+    _enqueue_tiktok(NOW - timedelta(minutes=5))
+
+    runner.run_once(now=NOW, publishers={"tiktok": runner.publish_tiktok_entry})
+
+    assert _states(fake_s3)["pending"][0]["attempts"] == 1
+    assert not any(c["url"].endswith("/inbox/video/init/") for c in tt_ready.calls)
+
+
+def test_tiktok_not_connected_fails_with_hint(fake_s3, fake_tt):
+    fake_s3.objects["videos/el-cuis/t.mp4"] = b"x"
+    _enqueue_tiktok(NOW - timedelta(minutes=5))
+
+    runner.run_once(now=NOW, publishers={"tiktok": runner.publish_tiktok_entry})
+
+    assert "tiktok-auth.py" in _states(fake_s3)["failed"][0]["lastError"]
+
+
+def test_main_registers_tiktok_publisher(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(runner, "run_once", lambda *, now, publishers: seen.update(publishers) or
+                        {"published": 0, "retried": 0, "failed": 0, "skipped": 0})
+
+    assert runner.main() == 0
+    assert seen["tiktok"] is runner.publish_tiktok_entry
+
+
+def test_stale_tiktok_processing_names_tiktok(fake_s3):
+    key = _enqueue_tiktok(NOW - timedelta(hours=3))
+    media_queue.move(key, "processing", updates={"claimedAt": (NOW - timedelta(minutes=61)).strftime("%Y-%m-%dT%H:%M:%SZ")})
+
+    runner.run_once(now=NOW, publishers={})
+
+    assert _states(fake_s3)["failed"][0]["lastError"] == "stale processing; check the TikTok inbox before retrying"

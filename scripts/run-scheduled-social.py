@@ -1,4 +1,4 @@
-"""Publish due scheduled social posts (Instagram; TikTok later) from the S3 queue.
+"""Publish due scheduled social posts (Instagram Reels, TikTok inbox drafts) from the S3 queue.
 
 Run by the ads-mcp-social systemd timer every 30 minutes:
     /usr/bin/flock -n /tmp/ads-mcp-social.lock /opt/ads-mcp/.venv/bin/python scripts/run-scheduled-social.py
@@ -23,7 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from shared import media_queue  # noqa: E402
+from shared import media_queue, secrets, tiktok_client  # noqa: E402
+from shared.config import get_settings  # noqa: E402
 from shared.errors import AdsMcpError  # noqa: E402
 from shared.instagram_publish import publish_reel  # noqa: E402
 from shared.runtime_config import load_meta_ads_config  # noqa: E402
@@ -55,6 +56,26 @@ def publish_instagram_entry(entry: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def publish_tiktok_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    """Send the video to the TikTok app inbox as a draft (TikTok inbox drafts carry no caption)."""
+    secret_id = f"/ads-mcp/{entry['businessKey']}/tiktok/config"
+    config = secrets.get_secret(secret_id, get_settings())
+    if not isinstance(config, dict) or not config.get("refresh_token"):
+        raise AdsMcpError(status_code=500, error_code="INTERNAL_ERROR", tool="tiktok_publish", retryable=False,
+                          message=f"TikTok is not connected for {entry['businessKey']}. {tiktok_client.REAUTH_HINT}")
+    access_token = tiktok_client.refresh_access_token(config, secret_id=secret_id)
+    key = entry["videoKey"]
+    sent = tiktok_client.send_to_inbox(
+        access_token, size=media_queue.object_size(key),
+        read_range=lambda start, end: media_queue.read_range(key, start, end),
+    )
+    caption = entry.get("caption")
+    note = "Sent to the TikTok app inbox as a draft; open TikTok and tap Post."
+    if caption:
+        note += f" Paste this caption: {caption}"
+    return {**sent, "note": note}
+
+
 def _fail(key: str, entry: dict[str, Any], reason: str, counts: dict[str, int], **updates: Any) -> None:
     media_queue.move(key, "failed", updates={"lastError": reason, **updates})
     counts["failed"] += 1
@@ -69,7 +90,8 @@ def _reason(exc: AdsMcpError) -> str:
 def _handle_processing(entry: dict[str, Any], now: datetime, counts: dict[str, int]) -> None:
     claimed = entry.get("claimedAt")
     if claimed and now - _parse(claimed) > STALE_PROCESSING_AFTER:
-        _fail(entry["_key"], entry, "stale processing; check Instagram before retrying", counts)
+        platform = {"instagram": "Instagram", "tiktok": "the TikTok inbox"}.get(entry.get("platform"), "the platform")
+        _fail(entry["_key"], entry, f"stale processing; check {platform} before retrying", counts)
 
 
 def _handle_pending(entry: dict[str, Any], now: datetime, publishers: dict[str, Publisher], counts: dict[str, int]) -> None:
@@ -139,7 +161,8 @@ def run_once(*, now: datetime, publishers: dict[str, Publisher]) -> dict[str, in
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)s  %(message)s",
                         datefmt="%Y-%m-%dT%H:%M:%S")
-    counts = run_once(now=datetime.now(timezone.utc), publishers={"instagram": publish_instagram_entry})
+    counts = run_once(now=datetime.now(timezone.utc), publishers={"instagram": publish_instagram_entry,
+                                                                  "tiktok": publish_tiktok_entry})
     log.info("run complete: %s", counts)
     return 1 if counts["failed"] else 0
 

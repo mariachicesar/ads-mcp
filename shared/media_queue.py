@@ -144,6 +144,15 @@ def move(key: str, to_state: str, *, updates: dict[str, Any] | None = None, buck
     return new_key
 
 
+def object_size(key: str, *, bucket: str | None = None) -> int:
+    return int(_s3_client().head_object(Bucket=_bucket(bucket), Key=key)["ContentLength"])
+
+
+def read_range(key: str, start: int, end: int, *, bucket: str | None = None) -> bytes:
+    """Bytes start..end (inclusive) of an object, read into memory (the EC2 disk is nearly full)."""
+    return _s3_client().get_object(Bucket=_bucket(bucket), Key=key, Range=f"bytes={start}-{end}")["Body"].read()
+
+
 def presigned_get(key: str, *, expires: int = 3600, bucket: str | None = None) -> str:
     return _s3_client().generate_presigned_url(
         "get_object", Params={"Bucket": _bucket(bucket), "Key": key}, ExpiresIn=expires,
