@@ -16,6 +16,7 @@ from shared import media_queue, scheduling
 from shared.caption_rules import check_caption
 from shared.models import ToolRequest
 from shared.responses import build_change, build_rule_check, build_success_response
+from shared import social_ledger
 from shared.social_profile import load_profile
 
 SERVICE_NAME = "tiktok"
@@ -81,9 +82,14 @@ def schedule_inbox_video(request: ToolRequest, request_id: str | None) -> dict:
                             after={**entry, "file": file}, resource_type="queue_entry")]
 
     def execute() -> dict[str, Any]:
-        video_key = media_queue.put_video(business_key=request.businessKey, file_path=source["filePath"], sha256=sha)
-        queue_key = media_queue.enqueue({**entry, "videoKey": video_key})
-        return {"entryId": queue_key.rsplit("-", 1)[-1].removesuffix(".json"), "queueKey": queue_key, "videoKey": video_key}
+        def enqueue() -> dict[str, Any]:
+            video_key = media_queue.put_video(business_key=request.businessKey, file_path=source["filePath"], sha256=sha)
+            queue_key = media_queue.enqueue({**entry, "videoKey": video_key})
+            return {"entryId": queue_key.rsplit("-", 1)[-1].removesuffix(".json"), "queueKey": queue_key, "videoKey": video_key}
+
+        return social_ledger.run_and_mark(
+            request.businessKey, enabled=profile is not None, file_path=source["filePath"], sha256=sha,
+            platform="tiktok", scheduled_at=entry["scheduledAt"], call=enqueue, ref_of=lambda r: r["entryId"])
 
     described = scheduling.describe_time(when)
     caption_note = ("The caption is NOT attached to the draft — paste it from tiktok_list_scheduled when you post."
@@ -118,12 +124,21 @@ def cancel_scheduled(request: ToolRequest, request_id: str | None) -> dict:
     changes = [build_change(field="queue_entry.state", label="State", before=entry["_state"], after="cancelled",
                             resource_type="queue_entry", resource_id=entry_id)]
     public = _public(entry)
+
+    def execute() -> dict[str, Any]:
+        result = {"queueKey": media_queue.move(entry["_key"], "cancelled")}
+        if load_profile(request.businessKey) is not None:
+            social_ledger.mark_cancelled(request.businessKey, sha256=entry.get("videoSha256"),
+                                         platform=entry.get("platform", "tiktok"),
+                                         scheduled_at=entry.get("scheduledAt"), ref=entry_id)
+        return result
+
     return scheduling.write_flow(
         request, request_id, service=SERVICE_NAME, tool=tool, rule_checks=rule_checks, changes=changes,
         preview={"entry": public},
         dry_summary=f"Would cancel the TikTok draft scheduled for {public['scheduledPacific']}.",
         done_summary=f"Cancelled the TikTok draft {entry_id}.",
-        execute=lambda: {"queueKey": media_queue.move(entry["_key"], "cancelled")},
+        execute=execute,
     )
 
 

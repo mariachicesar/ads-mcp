@@ -311,3 +311,39 @@ def test_page_tools_pass_good_caption(tool, reel_env, social_profile_dir, fixed_
     assert r["approvalId"]
     caption_checks = [c for c in r["ruleChecks"] if c["rule"] in CAPTION_RULES]
     assert {c["rule"] for c in caption_checks} == CAPTION_RULES and all(c["passed"] for c in caption_checks)
+
+
+# ── posting log ──────────────────────────────────────────────────────────────
+
+import json  # noqa: E402
+
+from tests.fake_s3 import fake_s3  # noqa: E402,F401  (fixture)
+
+
+@pytest.mark.parametrize("tool,ref", [("schedule_page_video", "new-video"), ("schedule_page_reel", "vid1")])
+def test_page_tools_execute_mark_ledger_queued(tool, ref, reel_env, fake_s3, social_profile_dir, fixed_now, tmp_path):
+    payload = _sched(tmp_path, description=GOOD)
+    dry = getattr(publish, tool)(_req(payload), None)
+    getattr(publish, tool)(_req(payload, dry["approvalId"]), None)
+
+    p = json.loads(fake_s3.objects["ledger/el-cuis.json"])["songs"]["a"]["platforms"]["facebook"]
+    assert p["state"] == "queued" and p["ref"] == ref
+    assert p["scheduledAt"] == "2026-11-12T20:00:00Z"
+
+
+def test_page_reel_failure_marks_ledger_failed(reel_env, fake_s3, social_profile_dir, fixed_now, tmp_path):
+    reel_env["finish_error"] = AdsMcpError(status_code=502, error_code="UPSTREAM_ERROR", message="boom", tool="t")
+    payload = _sched(tmp_path, description=GOOD)
+    dry = publish.schedule_page_reel(_req(payload), None)
+    with pytest.raises(AdsMcpError):
+        publish.schedule_page_reel(_req(payload, dry["approvalId"]), None)
+
+    assert json.loads(fake_s3.objects["ledger/el-cuis.json"])["songs"]["a"]["platforms"]["facebook"]["state"] == "failed"
+
+
+def test_page_tools_without_profile_write_no_ledger(reel_env, fake_s3, fixed_now, tmp_path):
+    payload = _sched(tmp_path)
+    dry = publish.schedule_page_video(_req(payload), None)
+    publish.schedule_page_video(_req(payload, dry["approvalId"]), None)
+
+    assert not any(k.startswith("ledger/") for k in fake_s3.objects)

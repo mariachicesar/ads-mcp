@@ -17,6 +17,7 @@ from shared.meta_ads_client import check_instagram_publish_access, get_instagram
 from shared.models import ToolRequest
 from shared.responses import build_change, build_rule_check, build_success_response
 from shared.runtime_config import load_meta_ads_config
+from shared import social_ledger
 from shared.social_profile import load_profile
 from tools import publish
 from tools.write import SERVICE_NAME, _invalid, _required, _write_flow
@@ -85,9 +86,14 @@ def schedule_instagram_reel(request: ToolRequest, request_id: str | None) -> dic
                             after={**entry, "file": file}, resource_type="queue_entry")]
 
     def execute() -> dict[str, Any]:
-        video_key = media_queue.put_video(business_key=request.businessKey, file_path=source["filePath"], sha256=sha)
-        queue_key = media_queue.enqueue({**entry, "videoKey": video_key})
-        return {"entryId": queue_key.rsplit("-", 1)[-1].removesuffix(".json"), "queueKey": queue_key, "videoKey": video_key}
+        def enqueue() -> dict[str, Any]:
+            video_key = media_queue.put_video(business_key=request.businessKey, file_path=source["filePath"], sha256=sha)
+            queue_key = media_queue.enqueue({**entry, "videoKey": video_key})
+            return {"entryId": queue_key.rsplit("-", 1)[-1].removesuffix(".json"), "queueKey": queue_key, "videoKey": video_key}
+
+        return social_ledger.run_and_mark(
+            request.businessKey, enabled=profile is not None, file_path=source["filePath"], sha256=sha,
+            platform="instagram", scheduled_at=entry["scheduledAt"], call=enqueue, ref_of=lambda r: r["entryId"])
 
     described = publish._describe_time(when)
     return _write_flow(
@@ -119,12 +125,20 @@ def cancel_scheduled_social(request: ToolRequest, request_id: str | None) -> dic
     )]
     changes = [build_change(field="queue_entry.state", label="State", before=entry["_state"], after="cancelled",
                             resource_type="queue_entry", resource_id=entry_id)]
+    def execute() -> dict[str, Any]:
+        result = {"queueKey": media_queue.move(entry["_key"], "cancelled")}
+        if load_profile(request.businessKey) is not None:
+            social_ledger.mark_cancelled(request.businessKey, sha256=entry.get("videoSha256"),
+                                         platform=entry.get("platform", "instagram"),
+                                         scheduled_at=entry.get("scheduledAt"), ref=entry_id)
+        return result
+
     return _write_flow(
         request, request_id, tool=tool, rule_checks=rule_checks, changes=changes,
         preview={"entry": _public(entry)},
         dry_summary=f"Would cancel the {entry.get('platform')} post scheduled for {_public(entry)['scheduledPacific']}.",
         done_summary=f"Cancelled the {entry.get('platform')} post {entry_id}.",
-        execute=lambda: {"queueKey": media_queue.move(entry["_key"], "cancelled")},
+        execute=execute,
     )
 
 

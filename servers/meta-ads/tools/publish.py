@@ -25,6 +25,7 @@ from shared.meta_ads_client import (
 from shared.models import ToolRequest
 from shared.responses import build_change, build_rule_check, build_success_response
 from shared.runtime_config import load_meta_ads_config
+from shared import social_ledger
 from shared.social_profile import load_profile
 from tools.write import SERVICE_NAME, _invalid, _required, _write_flow
 
@@ -91,6 +92,17 @@ def upload_ad_video(request: ToolRequest, request_id: str | None) -> dict:
     )
 
 
+def _mark_facebook(request: ToolRequest, profile: Any, source: dict[str, Any], sha: str | None,
+                   when: datetime, call: Any) -> dict[str, Any]:
+    """Run a Facebook schedule call and log it (only for profiled businesses)."""
+    file_path = source.get("filePath")
+    return social_ledger.run_and_mark(
+        request.businessKey, enabled=profile is not None and bool(file_path), file_path=file_path or "",
+        sha256=sha or "", platform="facebook",
+        scheduled_at=when.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        call=call, ref_of=lambda r: r.get("videoId"))
+
+
 def schedule_page_video(request: ToolRequest, request_id: str | None) -> dict:
     tool = "schedule_page_video"
     payload = request.payload
@@ -115,10 +127,13 @@ def schedule_page_video(request: ToolRequest, request_id: str | None) -> dict:
                             after={**fields, "file": file}, resource_type="page_video")]
 
     def execute() -> dict[str, Any]:
-        page_token = get_page_access_token(config, page_id=page_id, tool=tool)
-        result = post_video(config, path=path, fields=fields, file_path=source.get("filePath"),
-                            file_url=source.get("fileUrl"), access_token=page_token, tool=tool)
-        return {"videoId": result.get("id")}
+        def post() -> dict[str, Any]:
+            page_token = get_page_access_token(config, page_id=page_id, tool=tool)
+            result = post_video(config, path=path, fields=fields, file_path=source.get("filePath"),
+                                file_url=source.get("fileUrl"), access_token=page_token, tool=tool)
+            return {"videoId": result.get("id")}
+
+        return _mark_facebook(request, profile, source, sha, when, post)
 
     return _write_flow(
         request, request_id, tool=tool, rule_checks=rule_checks, changes=changes,
@@ -151,6 +166,9 @@ def schedule_page_reel(request: ToolRequest, request_id: str | None) -> dict:
                             after={**finish, "file": file}, resource_type="page_reel")]
 
     def execute() -> dict[str, Any]:
+        return _mark_facebook(request, profile, source, sha, when, schedule)
+
+    def schedule() -> dict[str, Any]:
         page_token = get_page_access_token(config, page_id=page_id, tool=tool)
         start = _graph_request(config, "POST", path, data={"upload_phase": "start"}, access_token=page_token, tool=tool)
         video_id = str(start.get("video_id"))
