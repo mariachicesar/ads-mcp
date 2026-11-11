@@ -1,3 +1,5 @@
+import pytest
+
 from shared.caption_rules import check_caption
 from tests.social_fixtures import GOOD
 
@@ -20,3 +22,14 @@ def test_city_case_accent_and_hashtag(profile):
     assert failed(check_caption(profile, base + " #downey")) == set()
     assert failed(check_caption(profile, base + " DOWNEY")) == set()
     assert failed(check_caption(profile, base + " #santamonica")) == set()
+
+
+@pytest.mark.parametrize("tail", [".", ",", ")", ").", "\n"])
+def test_link_followed_by_punctuation_ok(profile, tail):
+    caption = GOOD.replace("https://mariachielcuis.com/quinceaneras", "(https://mariachielcuis.com" + tail)
+    assert failed(check_caption(profile, caption)) == set()
+
+
+def test_link_to_lookalike_domain_rejected(profile):
+    caption = GOOD.replace("mariachielcuis.com/quinceaneras", "mariachielcuis.com.evil.com")
+    assert "caption-https-link" in failed(check_caption(profile, caption))

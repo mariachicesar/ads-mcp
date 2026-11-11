@@ -40,7 +40,9 @@ def check_caption(profile: dict, caption: str | None) -> list[dict]:
 
     # Link.
     domain = re.escape(profile.get("websiteDomain", ""))
-    https_ok = bool(re.search(rf"https://(www\.)?{domain}(?=[/?#\s]|$)", text, re.IGNORECASE))
+    # The domain must end the host: a path/query/fragment, whitespace, or end of text may follow,
+    # optionally after sentence punctuation ("...elcuis.com." / "(...elcuis.com)").
+    https_ok = bool(re.search(rf"https://(www\.)?{domain}(?=[/?#]|[.,)]*(?:\s|$))", text, re.IGNORECASE))
     has_http = bool(re.search(r"http://\S+", text, re.IGNORECASE))
     link_passed = https_ok and not has_http
     if has_http:
