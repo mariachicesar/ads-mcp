@@ -137,3 +137,35 @@ def test_meta_publish_helpers_still_importable():
     assert publish._parse_schedule_time is scheduling.parse_schedule_time
     assert publish._sha256 is scheduling.sha256_file
     assert callable(publish._schedule_window_check)
+
+
+# ── caption rules (profiled businesses) ──────────────────────────────────────
+
+from tests.social_fixtures import GOOD  # noqa: E402
+
+CAPTION_RULES = {"caption-hook", "caption-https-link", "caption-hashtags", "caption-city"}
+
+
+def test_inbox_video_blocks_caption_without_link(tt_env, fixed_now, social_profile_dir, tmp_path):
+    r = tt_env["mod"].schedule_inbox_video(_req(_payload(tmp_path)), None)
+
+    assert "approvalId" not in r
+    assert r["summary"].startswith("Blocked by business rules")
+    assert any(c["rule"] == "caption-https-link" and not c["passed"] for c in r["ruleChecks"])
+
+
+def test_inbox_video_missing_caption_blocked_with_profile(tt_env, fixed_now, social_profile_dir, tmp_path):
+    payload = _payload(tmp_path)
+    del payload["caption"]
+    r = tt_env["mod"].schedule_inbox_video(_req(payload), None)
+
+    assert "approvalId" not in r
+    assert any(c["rule"] == "caption-hook" and not c["passed"] for c in r["ruleChecks"])
+
+
+def test_inbox_video_passes_good_caption(tt_env, fixed_now, social_profile_dir, tmp_path):
+    r = tt_env["mod"].schedule_inbox_video(_req(_payload(tmp_path, caption=GOOD)), None)
+
+    assert r["approvalId"]
+    caption_checks = [c for c in r["ruleChecks"] if c["rule"] in CAPTION_RULES]
+    assert {c["rule"] for c in caption_checks} == CAPTION_RULES and all(c["passed"] for c in caption_checks)

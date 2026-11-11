@@ -11,11 +11,13 @@ from datetime import datetime
 from typing import Any
 
 from shared import media_queue
+from shared.caption_rules import check_caption
 from shared.errors import AdsMcpError
 from shared.meta_ads_client import check_instagram_publish_access, get_instagram_user_id
 from shared.models import ToolRequest
 from shared.responses import build_change, build_rule_check, build_success_response
 from shared.runtime_config import load_meta_ads_config
+from shared.social_profile import load_profile
 from tools import publish
 from tools.write import SERVICE_NAME, _invalid, _required, _write_flow
 
@@ -70,6 +72,9 @@ def schedule_instagram_reel(request: ToolRequest, request_id: str | None) -> dic
                          message=linked_msg),
         publish._schedule_window_check(when),
     ]
+    profile = load_profile(request.businessKey)
+    if profile is not None:
+        rule_checks.extend(check_caption(profile, caption))
     entry = {
         "platform": "instagram", "businessKey": request.businessKey,
         "scheduledAt": when.strftime("%Y-%m-%dT%H:%M:%SZ"), "videoSha256": sha,

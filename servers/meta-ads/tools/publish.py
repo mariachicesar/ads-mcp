@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from shared.caption_rules import check_caption
 from shared.errors import AdsMcpError
 from shared.meta_ads_client import (
     RUPLOAD_URL,
@@ -24,6 +25,7 @@ from shared.meta_ads_client import (
 from shared.models import ToolRequest
 from shared.responses import build_change, build_rule_check, build_success_response
 from shared.runtime_config import load_meta_ads_config
+from shared.social_profile import load_profile
 from tools.write import SERVICE_NAME, _invalid, _required, _write_flow
 
 from shared import scheduling
@@ -106,6 +108,9 @@ def schedule_page_video(request: ToolRequest, request_id: str | None) -> dict:
     fields = {k: v for k, v in fields.items() if v is not None}
     file = _file_preview(source, sha)
     rule_checks = [_page_check(config, page_id), _schedule_window_check(when)]
+    profile = load_profile(request.businessKey)
+    if profile is not None:
+        rule_checks.extend(check_caption(profile, description))
     changes = [build_change(field="page_video", label="Scheduled Page video", before=None,
                             after={**fields, "file": file}, resource_type="page_video")]
 
@@ -139,6 +144,9 @@ def schedule_page_reel(request: ToolRequest, request_id: str | None) -> dict:
               "scheduled_publish_time": int(when.timestamp()), "description": description}
     file = _file_preview(source, sha)
     rule_checks = [_page_check(config, page_id), _schedule_window_check(when)]
+    profile = load_profile(request.businessKey)
+    if profile is not None:
+        rule_checks.extend(check_caption(profile, description))
     changes = [build_change(field="page_reel", label="Scheduled Page Reel", before=None,
                             after={**finish, "file": file}, resource_type="page_reel")]
 

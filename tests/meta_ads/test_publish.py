@@ -286,3 +286,28 @@ def test_list_scheduled_page_videos_accepts_graph_datetime_strings(publish_env, 
 
     assert [v["id"] for v in videos] == ["early", "late"]
     assert videos[1]["scheduledPacific"] == "2026-11-13T12:00:00-08:00"
+
+
+# ── caption rules (profiled businesses) ──────────────────────────────────────
+
+from tests.social_fixtures import GOOD  # noqa: E402
+
+CAPTION_RULES = {"caption-hook", "caption-https-link", "caption-hashtags", "caption-city"}
+
+
+@pytest.mark.parametrize("tool", ["schedule_page_video", "schedule_page_reel"])
+def test_page_tools_block_caption_without_link(tool, reel_env, social_profile_dir, fixed_now, tmp_path):
+    r = getattr(publish, tool)(_req(_sched(tmp_path)), None)
+
+    assert "approvalId" not in r
+    assert r["summary"].startswith("Blocked by business rules")
+    assert any(c["rule"] == "caption-https-link" and not c["passed"] for c in r["ruleChecks"])
+
+
+@pytest.mark.parametrize("tool", ["schedule_page_video", "schedule_page_reel"])
+def test_page_tools_pass_good_caption(tool, reel_env, social_profile_dir, fixed_now, tmp_path):
+    r = getattr(publish, tool)(_req(_sched(tmp_path, description=GOOD)), None)
+
+    assert r["approvalId"]
+    caption_checks = [c for c in r["ruleChecks"] if c["rule"] in CAPTION_RULES]
+    assert {c["rule"] for c in caption_checks} == CAPTION_RULES and all(c["passed"] for c in caption_checks)

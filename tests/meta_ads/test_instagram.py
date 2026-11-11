@@ -168,3 +168,26 @@ def test_schedule_rejects_video_over_instagram_limit(ig_env, tmp_path, monkeypat
     with pytest.raises(AdsMcpError) as exc:
         instagram.schedule_instagram_reel(_req(_payload(tmp_path)), None)
     assert exc.value.error_code == "REQUEST_INVALID" and "300 MB" in exc.value.message
+
+
+# ── caption rules (profiled businesses) ──────────────────────────────────────
+
+from tests.social_fixtures import GOOD  # noqa: E402
+
+CAPTION_RULES = {"caption-hook", "caption-https-link", "caption-hashtags", "caption-city"}
+
+
+def test_schedule_instagram_reel_blocks_caption_without_link(ig_env, social_profile_dir, tmp_path):
+    r = instagram.schedule_instagram_reel(_req(_payload(tmp_path)), None)
+
+    assert "approvalId" not in r
+    assert r["summary"].startswith("Blocked by business rules")
+    assert any(c["rule"] == "caption-https-link" and not c["passed"] for c in r["ruleChecks"])
+
+
+def test_schedule_instagram_reel_passes_good_caption(ig_env, social_profile_dir, tmp_path):
+    r = instagram.schedule_instagram_reel(_req(_payload(tmp_path, caption=GOOD)), None)
+
+    assert r["approvalId"]
+    caption_checks = [c for c in r["ruleChecks"] if c["rule"] in CAPTION_RULES]
+    assert {c["rule"] for c in caption_checks} == CAPTION_RULES and all(c["passed"] for c in caption_checks)

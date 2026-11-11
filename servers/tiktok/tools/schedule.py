@@ -13,8 +13,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from shared import media_queue, scheduling
+from shared.caption_rules import check_caption
 from shared.models import ToolRequest
 from shared.responses import build_change, build_rule_check, build_success_response
+from shared.social_profile import load_profile
 
 SERVICE_NAME = "tiktok"
 PLATFORM = "tiktok"
@@ -66,6 +68,9 @@ def schedule_inbox_video(request: ToolRequest, request_id: str | None) -> dict:
     source, sha = scheduling.video_source(payload, tool)
 
     rule_checks = [scheduling.schedule_window_check(when, _now()), _daily_limit_check(request.businessKey, when)]
+    profile = load_profile(request.businessKey)
+    if profile is not None:
+        rule_checks.extend(check_caption(profile, caption))
     entry = {
         "platform": PLATFORM, "businessKey": request.businessKey,
         "scheduledAt": when.strftime("%Y-%m-%dT%H:%M:%SZ"), "videoSha256": sha,
