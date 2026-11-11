@@ -8,6 +8,7 @@ Rules (see docs/superpowers/plans/2026-11-10-instagram-scheduled-reels.md):
 - claim pending → processing before calling the platform (no double posts).
 - retryable platform error → back to pending, up to 3 attempts; otherwise failed.
 - processing older than 1 h → failed, never auto-reposted.
+- a failed entry is marked failed in the posting log (best effort) so the next run offers it again.
 
 Exit codes: 0 = nothing failed this run, 1 = at least one post failed.
 """
@@ -23,11 +24,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from shared import media_queue, secrets, tiktok_client  # noqa: E402
+from shared import media_queue, secrets, social_ledger, tiktok_client  # noqa: E402
 from shared.config import get_settings  # noqa: E402
 from shared.errors import AdsMcpError  # noqa: E402
 from shared.instagram_publish import publish_reel  # noqa: E402
 from shared.runtime_config import load_meta_ads_config  # noqa: E402
+from shared.social_profile import load_profile  # noqa: E402
 
 log = logging.getLogger("run-scheduled-social")
 
@@ -76,10 +78,30 @@ def publish_tiktok_entry(entry: dict[str, Any]) -> dict[str, Any]:
     return {**sent, "note": note}
 
 
+def _log_failed(entry: dict[str, Any]) -> None:
+    """Mark this entry's platform failed in the posting log; never affects publishing.
+
+    Only this entry's own record is replaced (expected_ref), so a newer queued post of the
+    same song is never clobbered.
+    """
+    try:
+        business_key, sha, platform = entry.get("businessKey"), entry.get("videoSha256"), entry.get("platform")
+        if not business_key or not sha or platform not in social_ledger.PLATFORMS or load_profile(business_key) is None:
+            return
+        song = social_ledger.song_for_sha(business_key, sha)
+        if song is None:
+            return
+        social_ledger.mark(business_key, song_key=song, sha256=sha, platform=platform, state="failed",
+                           scheduled_at=entry.get("scheduledAt"), ref=entry.get("id"), expected_ref=entry.get("id") or "")
+    except Exception:  # noqa: BLE001
+        log.exception("could not record failed %s %s in the posting log", entry.get("platform"), entry.get("id"))
+
+
 def _fail(key: str, entry: dict[str, Any], reason: str, counts: dict[str, int], **updates: Any) -> None:
     media_queue.move(key, "failed", updates={"lastError": reason, **updates})
     counts["failed"] += 1
     log.error("failed %s %s (%s): %s", entry.get("platform"), entry.get("id"), entry.get("businessKey"), reason)
+    _log_failed(entry)
 
 
 def _reason(exc: AdsMcpError) -> str:
