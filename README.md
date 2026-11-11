@@ -438,6 +438,31 @@ The `tiktok` MCP server queues videos in the same S3 queue (`platform: "tiktok"`
 - The runner streams the video from S3 in memory (one chunk ≤ 64 MiB, otherwise 10 MiB chunks), never to disk. Upload errors retry up to 3 times; once all chunks are uploaded nothing is retried automatically (check the TikTok inbox before rescheduling).
 - The refresh token lasts about a year; if it expires or is revoked, entries fail with a hint to rerun `scripts/tiktok-auth.py`.
 
+### TikTok stats (read-only)
+
+| Tool | What it does |
+|------|--------------|
+| `tiktok_get_account_stats` | Followers, following, total likes, video count |
+| `tiktok_get_video_stats` | Newest videos (`limit` 1-100, optional `days`) with views, likes, comments, shares, engagement rate and totals |
+
+- Needs the **Display API** scopes `user.info.stats` and `video.list` on the TikTok app (add the products/scopes on developers.tiktok.com), then rerun `python scripts/tiktok-auth.py` so the stored token carries them. The script warns if TikTok did not grant them.
+- These tools call TikTok directly and refresh the token on each call; a rotated refresh token is saved to Secrets Manager before use (your local AWS credentials need `secretsmanager:PutSecretValue` on the TikTok secret).
+- TikTok only returns lifetime counts per video: no per-day views or traffic sources.
+
+### YouTube (read-only, `servers/youtube/`)
+
+| Tool | What it does |
+|------|--------------|
+| `youtube_get_channel_overview` | Subscribers, lifetime views, video count |
+| `youtube_get_recent_videos` | Latest uploads (`limit` 1-50) with views, likes, comments, engagement rate |
+| `youtube_get_analytics` | Views, watch minutes, avg view duration, likes, comments, shares, subscribers gained for `LAST_7_DAYS`/`LAST_28_DAYS`/`LAST_30_DAYS`/`LAST_90_DAYS`, by `day`, `traffic_source`, `video`, `country` or `device` (data lags ~2 days) |
+
+**One-time setup**
+
+1. In the Google Cloud project used for the other Google servers, enable **YouTube Data API v3** and **YouTube Analytics API**, and add the scopes `youtube.readonly` and `yt-analytics.readonly` to the OAuth consent screen.
+2. `pip install google-auth-oauthlib`, then `python scripts/youtube-auth.py --business-key el-cuis` (same `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`). Sign in with the Google account that owns the channel. This saves `/ads-mcp/el-cuis/youtube/config` (add `--channel-id UC...` if the account manages several channels).
+3. Register it: `claude mcp add youtube -s local -- .venv/Scripts/python.exe servers/youtube/mcp_server.py`, or add a `youtube` entry to `claude_desktop_config.json` like `search-console`, then restart.
+
 ## Social posting workflow
 
 Schedules the same video to Facebook, Instagram and TikTok in one slot, with a batch approval. Currently configured for El Cuis (`el-cuis`).

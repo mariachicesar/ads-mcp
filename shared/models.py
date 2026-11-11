@@ -38,6 +38,7 @@ KNOWN_PLATFORMS: tuple[str, ...] = (
     "search-console",
     "gbp",
     "meta-ads",
+    "youtube",
 )
 
 

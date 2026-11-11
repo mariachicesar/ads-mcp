@@ -22,6 +22,11 @@ API = "https://open.tiktokapis.com"
 TOKEN_URL = f"{API}/v2/oauth/token/"
 INIT_URL = f"{API}/v2/post/publish/inbox/video/init/"
 STATUS_URL = f"{API}/v2/post/publish/status/fetch/"
+USER_INFO_URL = f"{API}/v2/user/info/"
+VIDEO_LIST_URL = f"{API}/v2/video/list/"
+USER_FIELDS = "open_id,display_name,follower_count,following_count,likes_count,video_count"
+VIDEO_FIELDS = "id,title,video_description,create_time,share_url,duration,view_count,like_count,comment_count,share_count"
+ANALYTICS_SCOPES = ("user.info.stats", "video.list")
 
 MIB = 1024 * 1024
 SINGLE_CHUNK_MAX = 64 * MIB
@@ -165,3 +170,59 @@ def send_to_inbox(
             raise _error(f"TikTok rejected the video: {reason}.", retryable=False, publishId=publish_id, failReason=reason)
     raise _error(f"TikTok did not confirm delivery within {timeout_seconds}s (last status {last}); "
                  "check the TikTok inbox before rescheduling.", retryable=False, publishId=publish_id, lastStatus=last)
+
+
+# ---------------------------------------------------------------------------
+# Read-only analytics (Display API). Needs the user.info.stats and video.list
+# scopes on the stored refresh token; reconnect with scripts/tiktok-auth.py
+# after adding them to the TikTok app.
+# ---------------------------------------------------------------------------
+
+def _scope_hint(code: str | None) -> str:
+    if code in {"scope_not_authorized", "scope_permission_missed"}:
+        return (" The TikTok connection is missing the user.info.stats/video.list scopes: add them to the "
+                "TikTok app, then rerun `python scripts/tiktok-auth.py`.")
+    return ""
+
+
+def get_user_stats(access_token: str) -> dict[str, Any]:
+    """Account totals: followers, following, likes and video count."""
+    try:
+        resp = requests.get(USER_INFO_URL, params={"fields": USER_FIELDS}, timeout=TIMEOUT,
+                            headers={"Authorization": f"Bearer {access_token}"})
+    except RequestException as exc:
+        raise _error(f"Could not reach TikTok ({type(exc).__name__}).", retryable=True) from exc
+    try:
+        body = resp.json()
+    except ValueError:
+        body = {}
+    body = body if isinstance(body, dict) else {}
+    try:
+        data = _api_check(resp.status_code, body, "user info", retryable=True)
+    except AdsMcpError as exc:
+        exc.message += _scope_hint(exc.details.get("tiktokCode"))
+        raise
+    return data.get("user") or {}
+
+
+def list_videos(access_token: str, *, limit: int = 20) -> list[dict[str, Any]]:
+    """The creator's public videos, newest first, with view/like/comment/share counts (up to `limit`)."""
+    videos: list[dict[str, Any]] = []
+    cursor: int | None = None
+    while len(videos) < limit:
+        payload: dict[str, Any] = {"max_count": min(20, limit - len(videos))}
+        if cursor is not None:
+            payload["cursor"] = cursor
+        status, body = _post(f"{VIDEO_LIST_URL}?fields={VIDEO_FIELDS}", json=payload, headers={
+            "Authorization": f"Bearer {access_token}", "Content-Type": "application/json; charset=UTF-8"})
+        try:
+            data = _api_check(status, body, "video list", retryable=True)
+        except AdsMcpError as exc:
+            exc.message += _scope_hint(exc.details.get("tiktokCode"))
+            raise
+        page = data.get("videos") or []
+        videos.extend(page)
+        if not data.get("has_more") or not page:
+            break
+        cursor = data.get("cursor")
+    return videos[:limit]

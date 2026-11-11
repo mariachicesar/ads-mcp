@@ -16,7 +16,7 @@ def test_manifest_fills_missing_platform_keys():
 
 def test_known_platforms_order():
     assert KNOWN_PLATFORMS == (
-        "google-ads", "analytics", "search-console", "gbp", "meta-ads",
+        "google-ads", "analytics", "search-console", "gbp", "meta-ads", "youtube",
     )
 
 
