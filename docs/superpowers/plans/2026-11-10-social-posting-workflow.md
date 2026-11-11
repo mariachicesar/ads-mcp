@@ -253,7 +253,7 @@ def test_different_songs(): assert song_key("17anos Reel.mp4") != song_key("20 A
   3. `meta_ads_get_organic_insights` → weekday time (`recommendedWeekdayTime`) and what hooks/topics/cities performed.
   4. `social_next_open_slots(weekday_time=...)`; assign candidates oldest-first to slots; extras wait for next run.
   5. Demand data: Search Console queries/pages (last 28 days), Google Ads search terms, GA4 top pages → per video pick event topic, 1–2 service cities (no city two posts in a row), and a real `https://mariachielcuis.com/...` page (must appear in GA4 or Search Console page data).
-  6. Web search for current mariachi / LA event hashtags; pick 8–12 total incl. `alwaysHashtags`, one mixed block.
+  6. Ask once (optional, skippable): "Paste any trending searches or hashtags from TikTok Creator Search Insights" (in-app only, no API). Then web search for current mariachi / LA event hashtags. Pasted terms rank first. Pick 8–12 total incl. `alwaysHashtags`, one mixed block.
   7. Write each caption in the spec's bilingual format; follow brand guardrails (no pricing, availability or unconfirmed claims).
   8. Dry-run every post on every missing platform: `meta_ads_schedule_page_reel` (Facebook; `description` = caption), `meta_ads_schedule_instagram_reel`, `tiktok_schedule_inbox_video`. Show the batch as a table per video: slot, file, platforms, rule checks, full caption.
   9. Wait for one explicit batch approval.
