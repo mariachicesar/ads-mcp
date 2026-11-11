@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import os
+from datetime import datetime
 from importlib import import_module
 from typing import Any
 
@@ -417,3 +418,133 @@ def create_account_object(config: dict[str, Any], *, edge: str, fields: dict[str
 
 def configured_account_id(config: dict[str, Any], *, tool: str | None = None) -> str:
     return _account_id(config.get("ad_account_id"), tool=tool)
+
+
+# ── Organic insights (read-only, GET) ────────────────────────────────────────
+
+IG_MEDIA_FIELDS = "id,caption,media_product_type,timestamp,permalink,like_count,comments_count"
+IG_MEDIA_METRICS = "reach,views,saved,shares,total_interactions"
+
+
+def _parse_graph_time(value: Any) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _metric_values(row: dict[str, Any]) -> dict[str, Any]:
+    """Flatten an /insights response to {metric name: first value}."""
+    out: dict[str, Any] = {}
+    for item in row.get("data", []):
+        if not isinstance(item, dict) or not item.get("name"):
+            continue
+        values = item.get("values") or []
+        if values and isinstance(values[0], dict):
+            out[item["name"]] = values[0].get("value")
+        elif isinstance(item.get("total_value"), dict):
+            out[item["name"]] = item["total_value"].get("value")
+    return out
+
+
+def _insight_error(exc: AdsMcpError) -> str:
+    return str(exc.details.get("userMessage") or exc.details.get("reason") or exc.message)
+
+
+def _paged_since(config: dict[str, Any], path: str, fields: str, time_key: str, since: datetime,
+                 *, access_token: str | None, tool: str | None) -> list[dict[str, Any]]:
+    """Walk a newest-first Graph edge, stopping at the first item older than `since`."""
+    items: list[dict[str, Any]] = []
+    after: str | None = None
+    for _ in range(20):
+        params: dict[str, Any] = {"fields": fields, "limit": 50}
+        if after:
+            params["after"] = after
+        page = _graph_request(config, "GET", path, params=params, access_token=access_token, tool=tool)
+        rows = page.get("data", [])
+        for row in rows:
+            stamp = _parse_graph_time(row.get(time_key))
+            if stamp is not None and stamp < since:
+                return items
+            items.append(row)
+        paging = page.get("paging") or {}
+        after = (paging.get("cursors") or {}).get("after")
+        if not rows or not after or not paging.get("next"):
+            break
+    return items
+
+
+def get_instagram_media_insights(
+    config: dict[str, Any], *, ig_user_id: str, since: datetime, tool: str | None = None,
+) -> list[dict[str, Any]]:
+    """Media published since `since`, each with an `insights` dict (None plus `insightsError` if rejected)."""
+    media = _paged_since(config, f"{ig_user_id}/media", IG_MEDIA_FIELDS, "timestamp", since,
+                         access_token=None, tool=tool)
+    results = []
+    for item in media:
+        row = dict(item)
+        try:
+            row["insights"] = _metric_values(_graph_request(
+                config, "GET", f"{item['id']}/insights", params={"metric": IG_MEDIA_METRICS}, tool=tool))
+        except AdsMcpError as exc:
+            row["insights"] = None
+            row["insightsError"] = _insight_error(exc)
+        results.append(row)
+    return results
+
+
+def get_instagram_online_followers(
+    config: dict[str, Any], *, ig_user_id: str, tool: str | None = None,
+) -> dict[int, int] | None:
+    """UTC hour -> average followers online, or None when the metric is unavailable."""
+    try:
+        body = _graph_request(config, "GET", f"{ig_user_id}/insights",
+                              params={"metric": "online_followers", "period": "lifetime"}, tool=tool)
+    except AdsMcpError:
+        return None
+    totals: dict[int, float] = {}
+    days = 0
+    for item in body.get("data", []):
+        for entry in item.get("values", []):
+            hours = entry.get("value")
+            if not isinstance(hours, dict):
+                continue
+            days += 1
+            for hour, count in hours.items():
+                try:
+                    totals[int(hour)] = totals.get(int(hour), 0) + float(count)
+                except (TypeError, ValueError):
+                    continue
+    if not days or not totals:
+        return None
+    return {hour: round(total / days) for hour, total in sorted(totals.items())}
+
+
+def get_page_post_insights(
+    config: dict[str, Any], *, page_id: str, since: datetime, tool: str | None = None,
+) -> list[dict[str, Any]]:
+    """Page posts since `since` with reach, reactions, comments and shares (reach None + `insightsError` if rejected)."""
+    token = get_page_access_token(config, page_id=page_id, tool=tool)
+    fields = ("id,message,created_time,permalink_url,reactions.summary(true).limit(0),"
+              "comments.summary(true).limit(0),shares")
+    posts = _paged_since(config, f"{page_id}/published_posts", fields, "created_time", since,
+                         access_token=token, tool=tool)
+    results = []
+    for post in posts:
+        row = {
+            "id": post.get("id"), "message": post.get("message"), "created_time": post.get("created_time"),
+            "permalink_url": post.get("permalink_url"),
+            "reactions": (post.get("reactions") or {}).get("summary", {}).get("total_count", 0),
+            "comments": (post.get("comments") or {}).get("summary", {}).get("total_count", 0),
+            "shares": (post.get("shares") or {}).get("count", 0),
+            "reach": None,
+        }
+        try:
+            metrics = _metric_values(_graph_request(
+                config, "GET", f"{post['id']}/insights", params={"metric": "post_impressions_unique"},
+                access_token=token, tool=tool))
+            row["reach"] = metrics.get("post_impressions_unique")
+        except AdsMcpError as exc:
+            row["insightsError"] = _insight_error(exc)
+        results.append(row)
+    return results
