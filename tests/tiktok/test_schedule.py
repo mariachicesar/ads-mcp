@@ -7,7 +7,7 @@ import pytest
 
 from shared import approval_store, media_queue
 from shared.models import ToolRequest
-from tests.fake_s3 import fake_s3  # noqa: F401  (fixture)
+from tests.fake_s3 import PreconditionFailed, fake_s3  # noqa: F401  (fixture)
 from tests.service_import import load_service_module
 
 NOW = datetime(2026, 11, 10, 16, 0, tzinfo=timezone.utc)  # 08:00 PST
@@ -210,3 +210,20 @@ def test_cancel_marks_ledger_cancelled(tt_env, social_profile_dir):
 
     p = _ledger(tt_env["s3"])["songs"]["x"]["platforms"]["tiktok"]
     assert p["state"] == "cancelled" and p["ref"] == entry_id
+
+
+def test_tiktok_execute_ledger_failure_still_returns_result(tt_env, fixed_now, social_profile_dir, tmp_path):
+    mod = tt_env["mod"]
+    payload = _payload(tmp_path, caption=GOOD)
+    dry = mod.schedule_inbox_video(_req(payload), None)
+    real = tt_env["s3"].put_object
+
+    def put(**kw):
+        if kw["Key"].startswith("ledger/"):
+            raise PreconditionFailed("race")
+        return real(**kw)
+
+    tt_env["s3"].put_object = put
+    done = mod.schedule_inbox_video(_req(payload, dry["approvalId"]), None)
+
+    assert done["data"]["result"]["entryId"] and "ledgerWarning" in done["data"]["result"]

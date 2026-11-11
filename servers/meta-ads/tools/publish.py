@@ -25,11 +25,10 @@ from shared.meta_ads_client import (
 from shared.models import ToolRequest
 from shared.responses import build_change, build_rule_check, build_success_response
 from shared.runtime_config import load_meta_ads_config
-from shared import social_ledger
 from shared.social_profile import load_profile
 from tools.write import SERVICE_NAME, _invalid, _required, _write_flow
 
-from shared import scheduling
+from shared import scheduling, social_ledger
 from shared.scheduling import (  # noqa: F401  (re-exported for callers and tests)
     MAX_LEAD, MAX_VIDEO_BYTES, MIN_LEAD, SCHEDULE_TZ, VIDEO_EXTENSIONS,
 )

@@ -5,11 +5,12 @@ from datetime import datetime, timezone
 
 import pytest
 
-from shared import approval_store, media_queue
+from shared import approval_store, media_queue, social_ledger
 from shared.errors import AdsMcpError
 from shared.models import ToolRequest
-from tests.fake_s3 import fake_s3  # noqa: F401  (fixture)
+from tests.fake_s3 import PreconditionFailed, fake_s3  # noqa: F401  (fixture)
 from tests.service_import import load_service_module
+from tests.social_fixtures import GOOD
 
 instagram = load_service_module("meta-ads", "tools.instagram")
 
@@ -172,7 +173,6 @@ def test_schedule_rejects_video_over_instagram_limit(ig_env, tmp_path, monkeypat
 
 # ── caption rules (profiled businesses) ──────────────────────────────────────
 
-from tests.social_fixtures import GOOD  # noqa: E402
 
 CAPTION_RULES = {"caption-hook", "caption-https-link", "caption-hashtags", "caption-city"}
 
@@ -195,7 +195,6 @@ def test_schedule_instagram_reel_passes_good_caption(ig_env, social_profile_dir,
 
 # ── posting log ──────────────────────────────────────────────────────────────
 
-from shared import social_ledger  # noqa: E402
 
 
 def _ledger(s3):
@@ -243,3 +242,36 @@ def test_cancel_marks_ledger_cancelled(ig_env, social_profile_dir):
 
     p = _ledger(ig_env["s3"])["songs"]["x"]["platforms"]["instagram"]
     assert p["state"] == "cancelled" and p["ref"] == entry_id
+
+
+def _break_ledger_writes(s3):
+    real = s3.put_object
+
+    def put(**kw):
+        if kw["Key"].startswith("ledger/"):
+            raise PreconditionFailed("race")
+        return real(**kw)
+
+    s3.put_object = put
+
+
+def test_instagram_execute_ledger_failure_still_returns_result(ig_env, social_profile_dir, tmp_path):
+    payload = _payload(tmp_path, caption=GOOD)
+    dry = instagram.schedule_instagram_reel(_req(payload), None)
+    _break_ledger_writes(ig_env["s3"])
+    done = instagram.schedule_instagram_reel(_req(payload, dry["approvalId"]), None)
+
+    result = done["data"]["result"]
+    assert result["entryId"] and "ledgerWarning" in result
+
+
+def test_instagram_cancel_ledger_failure_still_returns_result(ig_env, social_profile_dir):
+    social_ledger.mark("el-cuis", song_key="x", sha256="x", platform="instagram", state="queued",
+                       scheduled_at="2026-11-13T02:00:00Z", ref="old")
+    _, entry_id = _queued()
+    dry = instagram.cancel_scheduled_social(_req({"entryId": entry_id}), None)
+    _break_ledger_writes(ig_env["s3"])
+    done = instagram.cancel_scheduled_social(_req({"entryId": entry_id}, dry["approvalId"]), None)
+
+    assert "ledgerWarning" in done["data"]["result"]
+    assert any(k.startswith("queue/cancelled/") for k in ig_env["s3"].objects)

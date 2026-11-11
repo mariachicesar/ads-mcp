@@ -10,14 +10,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from shared import media_queue
+from shared import media_queue, social_ledger
 from shared.caption_rules import check_caption
 from shared.errors import AdsMcpError
 from shared.meta_ads_client import check_instagram_publish_access, get_instagram_user_id
 from shared.models import ToolRequest
 from shared.responses import build_change, build_rule_check, build_success_response
 from shared.runtime_config import load_meta_ads_config
-from shared import social_ledger
 from shared.social_profile import load_profile
 from tools import publish
 from tools.write import SERVICE_NAME, _invalid, _required, _write_flow
@@ -128,9 +127,11 @@ def cancel_scheduled_social(request: ToolRequest, request_id: str | None) -> dic
     def execute() -> dict[str, Any]:
         result = {"queueKey": media_queue.move(entry["_key"], "cancelled")}
         if load_profile(request.businessKey) is not None:
-            social_ledger.mark_cancelled(request.businessKey, sha256=entry.get("videoSha256"),
+            warning = social_ledger.mark_cancelled(request.businessKey, sha256=entry.get("videoSha256"),
                                          platform=entry.get("platform", "instagram"),
                                          scheduled_at=entry.get("scheduledAt"), ref=entry_id)
+            if warning:
+                result["ledgerWarning"] = warning
         return result
 
     return _write_flow(

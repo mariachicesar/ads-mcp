@@ -12,11 +12,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from shared import media_queue, scheduling
+from shared import media_queue, scheduling, social_ledger
 from shared.caption_rules import check_caption
 from shared.models import ToolRequest
 from shared.responses import build_change, build_rule_check, build_success_response
-from shared import social_ledger
 from shared.social_profile import load_profile
 
 SERVICE_NAME = "tiktok"
@@ -128,9 +127,11 @@ def cancel_scheduled(request: ToolRequest, request_id: str | None) -> dict:
     def execute() -> dict[str, Any]:
         result = {"queueKey": media_queue.move(entry["_key"], "cancelled")}
         if load_profile(request.businessKey) is not None:
-            social_ledger.mark_cancelled(request.businessKey, sha256=entry.get("videoSha256"),
+            warning = social_ledger.mark_cancelled(request.businessKey, sha256=entry.get("videoSha256"),
                                          platform=entry.get("platform", "tiktok"),
                                          scheduled_at=entry.get("scheduledAt"), ref=entry_id)
+            if warning:
+                result["ledgerWarning"] = warning
         return result
 
     return scheduling.write_flow(

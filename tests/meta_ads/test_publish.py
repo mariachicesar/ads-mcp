@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from datetime import datetime, timezone
 
 import pytest
 
 from shared import approval_store
 from shared.errors import AdsMcpError
 from shared.models import ToolRequest
+from tests.fake_s3 import fake_s3  # noqa: F401  (fixture)
 from tests.service_import import load_service_module
+from tests.social_fixtures import GOOD
 
 publish = load_service_module("meta-ads", "tools.publish")
 
@@ -111,7 +115,6 @@ def test_video_source_rejects_wrong_extension_and_oversize(tmp_path, monkeypatch
 
 # ── scheduling helpers + schedule_page_video ─────────────────────────────────
 
-from datetime import datetime, timezone  # noqa: E402
 
 NOW = datetime(2026, 11, 10, 16, 0, tzinfo=timezone.utc)  # 08:00 PST
 NOON_NOV12_PT = 1794513600  # 2026-11-12T12:00:00-08:00
@@ -290,7 +293,6 @@ def test_list_scheduled_page_videos_accepts_graph_datetime_strings(publish_env, 
 
 # ── caption rules (profiled businesses) ──────────────────────────────────────
 
-from tests.social_fixtures import GOOD  # noqa: E402
 
 CAPTION_RULES = {"caption-hook", "caption-https-link", "caption-hashtags", "caption-city"}
 
@@ -315,9 +317,7 @@ def test_page_tools_pass_good_caption(tool, reel_env, social_profile_dir, fixed_
 
 # ── posting log ──────────────────────────────────────────────────────────────
 
-import json  # noqa: E402
 
-from tests.fake_s3 import fake_s3  # noqa: E402,F401  (fixture)
 
 
 @pytest.mark.parametrize("tool,ref", [("schedule_page_video", "new-video"), ("schedule_page_reel", "vid1")])

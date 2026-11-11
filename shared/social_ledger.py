@@ -9,6 +9,7 @@ conditional writes (IfNoneMatch to create, IfMatch with the ETag to update).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import unicodedata
@@ -20,6 +21,7 @@ from shared import media_queue
 STATES = ("queued", "failed", "cancelled")
 PLATFORMS = ("facebook", "instagram", "tiktok")
 MAX_ATTEMPTS = 3
+log = logging.getLogger(__name__)
 _TRAILING_WORDS = {"reel", "post", "clip", "ads"}
 
 
@@ -101,28 +103,48 @@ def mark(business_key: str, *, song_key: str, sha256: str, platform: str, state:
 def run_and_mark(business_key: str, *, enabled: bool, file_path: str, sha256: str, platform: str,
                  scheduled_at: str, call: Callable[[], dict[str, Any]],
                  ref_of: Callable[[dict[str, Any]], str | None]) -> dict[str, Any]:
-    """Run a schedule call, logging queued on success and failed (then re-raising) on error."""
+    """Run a schedule call, logging queued on success and failed (then re-raising) on error.
+
+    The log is best effort: once the platform call succeeded, a log failure must not fail the tool
+    (that would invite a double post), so it is reported as `ledgerWarning`. If the platform call
+    fails, the original error is always the one re-raised.
+    """
     if not enabled:
         return call()
     key = song_key(os.path.basename(file_path))
     try:
         result = call()
     except Exception:
-        mark(business_key, song_key=key, sha256=sha256, platform=platform, state="failed",
-             scheduled_at=scheduled_at, ref=None)
+        try:
+            mark(business_key, song_key=key, sha256=sha256, platform=platform, state="failed",
+                 scheduled_at=scheduled_at, ref=None)
+        except Exception:  # noqa: BLE001 - never mask the platform error
+            log.exception("Could not record failed %s post in the posting log", platform)
         raise
-    mark(business_key, song_key=key, sha256=sha256, platform=platform, state="queued",
-         scheduled_at=scheduled_at, ref=ref_of(result))
+    try:
+        mark(business_key, song_key=key, sha256=sha256, platform=platform, state="queued",
+             scheduled_at=scheduled_at, ref=ref_of(result))
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Could not record queued %s post in the posting log", platform)
+        return {**result, "ledgerWarning": f"Post was scheduled but the posting log was not updated: {exc}"}
     return result
 
 
 def mark_cancelled(business_key: str, *, sha256: str | None, platform: str,
-                   scheduled_at: str | None, ref: str | None) -> None:
-    """Mark the platform cancelled for whichever song holds this sha; no-op if none does."""
+                   scheduled_at: str | None, ref: str | None) -> str | None:
+    """Mark the platform cancelled for whichever song holds this sha; no-op if none does.
+
+    Best effort: returns a warning message if the log could not be updated, else None.
+    """
     if not sha256:
-        return
-    key = song_for_sha(business_key, sha256)
-    if key is None:
-        return
-    mark(business_key, song_key=key, sha256=sha256, platform=platform, state="cancelled",
-         scheduled_at=scheduled_at, ref=ref)
+        return None
+    try:
+        key = song_for_sha(business_key, sha256)
+        if key is None:
+            return None
+        mark(business_key, song_key=key, sha256=sha256, platform=platform, state="cancelled",
+             scheduled_at=scheduled_at, ref=ref)
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Could not record cancelled %s post in the posting log", platform)
+        return f"Post was cancelled but the posting log was not updated: {exc}"
+    return None
