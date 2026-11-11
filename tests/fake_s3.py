@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 
 import pytest
@@ -21,13 +22,19 @@ class FakeS3:
         self.puts: list[str] = []
         self.exceptions = type("Exceptions", (), {"NoSuchKey": _NoSuchKey})
 
-    def put_object(self, *, Bucket, Key, Body, IfNoneMatch=None, **kw):
+    @staticmethod
+    def _etag(data: bytes) -> str:
+        return '"' + hashlib.md5(data).hexdigest() + '"'
+
+    def put_object(self, *, Bucket, Key, Body, IfNoneMatch=None, IfMatch=None, **kw):
         if IfNoneMatch == "*" and Key in self.objects:
+            raise PreconditionFailed(Key)
+        if IfMatch is not None and (Key not in self.objects or self._etag(self.objects[Key]) != IfMatch):
             raise PreconditionFailed(Key)
         data = Body.read() if hasattr(Body, "read") else (Body.encode() if isinstance(Body, str) else Body)
         self.objects[Key] = data
         self.puts.append(Key)
-        return {}
+        return {"ETag": self._etag(data)}
 
     def upload_file(self, Filename, Bucket, Key, ExtraArgs=None):
         with open(Filename, "rb") as fh:
@@ -40,7 +47,7 @@ class FakeS3:
         if Range:
             start, end = (int(x) for x in Range.removeprefix("bytes=").split("-"))
             data = data[start:end + 1]
-        return {"Body": io.BytesIO(data), "ContentLength": len(data)}
+        return {"Body": io.BytesIO(data), "ContentLength": len(data), "ETag": self._etag(self.objects[Key])}
 
     def head_object(self, *, Bucket, Key):
         if Key not in self.objects:

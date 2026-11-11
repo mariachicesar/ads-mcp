@@ -1,0 +1,7 @@
+boto3>=1.42.0  # S3 conditional writes for the social queue
+fastmcp>=2.0.0
+pydantic>=2.9.0
+python-dotenv>=1.0.0
+redis>=5.2.0
+requests>=2.32.0
+tzdata>=2024.1  # zoneinfo needs it on Windows

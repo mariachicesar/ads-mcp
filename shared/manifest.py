@@ -47,6 +47,7 @@ REQUIRED_KEYS_BY_PLATFORM: dict[str, tuple[str, ...]] = {
     "search-console": ("site_url", "client_id", "client_secret", "refresh_token"),
     "gbp": ("client_id", "client_secret", "refresh_token", "gbp_location_id"),
     "meta-ads": ("ad_account_id", "access_token", "app_id", "app_secret", "page_id"),
+    "youtube": ("client_id", "client_secret", "refresh_token"),
 }
 
 

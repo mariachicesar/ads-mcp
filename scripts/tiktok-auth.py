@@ -1,4 +1,4 @@
-"""Connect a business's TikTok account once, for scheduled inbox drafts.
+"""Connect a business's TikTok account once, for scheduled inbox drafts and read-only stats.
 
     python scripts/tiktok-auth.py [--business-key el-cuis] [--redirect-uri https://mariachielcuis.com/]
 
@@ -27,7 +27,8 @@ from shared import secrets, tiktok_client  # noqa: E402
 from shared.config import get_settings  # noqa: E402
 
 AUTHORIZE_URL = "https://www.tiktok.com/v2/auth/authorize/"
-SCOPES = "user.info.basic,video.upload"
+# video.upload: inbox drafts. user.info.stats + video.list: tiktok_get_account_stats / tiktok_get_video_stats.
+SCOPES = "user.info.basic,video.upload,user.info.stats,video.list"
 DEFAULT_REDIRECT = "https://mariachielcuis.com/"
 
 
@@ -61,6 +62,10 @@ def exchange_and_save(*, business_key: str, client_key: str, client_secret: str,
     granted = {s.strip() for s in str(body.get("scope", "")).split(",")}
     if "video.upload" not in granted:
         raise ValueError("TikTok did not grant the video.upload scope; enable it on the app and approve it when asked.")
+    missing = [s for s in tiktok_client.ANALYTICS_SCOPES if s not in granted]
+    if missing:
+        print(f"Warning: TikTok did not grant {', '.join(missing)}; scheduling works, but the stats tools "
+              "will fail until those scopes are added to the app and you reconnect.", file=sys.stderr)
     expires_at = (datetime.now(timezone.utc) + timedelta(seconds=int(body.get("refresh_expires_in") or 0))
                   ).strftime("%Y-%m-%dT%H:%M:%SZ")
     secret_id = f"/ads-mcp/{business_key}/tiktok/config"
@@ -75,10 +80,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--business-key", default="el-cuis")
     parser.add_argument("--redirect-uri", default=DEFAULT_REDIRECT)
+    parser.add_argument("--client-key", default=None, help="TikTok Client key (public; Sandbox keys start with sb)")
     args = parser.parse_args()
 
-    client_key = os.getenv("TIKTOK_CLIENT_KEY") or input("TikTok Client key: ").strip()
-    client_secret = os.getenv("TIKTOK_CLIENT_SECRET") or getpass.getpass("TikTok Client secret (hidden): ").strip()
+    client_key = (args.client_key or os.getenv("TIKTOK_CLIENT_KEY") or input("TikTok Client key: ")).strip()
+    if not client_key:
+        print("Not connected: the Client key is empty.", file=sys.stderr)
+        return 1
+    print(f"Using Client key {client_key}")
+    client_secret = (os.getenv("TIKTOK_CLIENT_SECRET") or getpass.getpass("TikTok Client secret (hidden): ")).strip()
+    if not client_secret:
+        print("Not connected: the Client secret is empty.", file=sys.stderr)
+        return 1
     state = pysecrets.token_urlsafe(16)
     print("\n1. Open this link while logged in to the business TikTok account and tap Authorize:\n")
     print(build_auth_url(client_key, args.redirect_uri, state))

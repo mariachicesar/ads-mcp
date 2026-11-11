@@ -438,6 +438,83 @@ The `tiktok` MCP server queues videos in the same S3 queue (`platform: "tiktok"`
 - The runner streams the video from S3 in memory (one chunk ≤ 64 MiB, otherwise 10 MiB chunks), never to disk. Upload errors retry up to 3 times; once all chunks are uploaded nothing is retried automatically (check the TikTok inbox before rescheduling).
 - The refresh token lasts about a year; if it expires or is revoked, entries fail with a hint to rerun `scripts/tiktok-auth.py`.
 
+### TikTok stats (read-only)
+
+| Tool | What it does |
+|------|--------------|
+| `tiktok_get_account_stats` | Followers, following, total likes, video count |
+| `tiktok_get_video_stats` | Newest videos (`limit` 1-100, optional `days`) with views, likes, comments, shares, engagement rate and totals |
+
+- Needs the **Display API** scopes `user.info.stats` and `video.list` on the TikTok app (add the products/scopes on developers.tiktok.com), then rerun `python scripts/tiktok-auth.py` so the stored token carries them. The script warns if TikTok did not grant them.
+- These tools call TikTok directly and refresh the token on each call; a rotated refresh token is saved to Secrets Manager before use (your local AWS credentials need `secretsmanager:PutSecretValue` on the TikTok secret).
+- TikTok only returns lifetime counts per video: no per-day views or traffic sources.
+
+### YouTube (read-only, `servers/youtube/`)
+
+| Tool | What it does |
+|------|--------------|
+| `youtube_get_channel_overview` | Subscribers, lifetime views, video count |
+| `youtube_get_recent_videos` | Latest uploads (`limit` 1-50) with views, likes, comments, engagement rate |
+| `youtube_get_analytics` | Views, watch minutes, avg view duration, likes, comments, shares, subscribers gained for `LAST_7_DAYS`/`LAST_28_DAYS`/`LAST_30_DAYS`/`LAST_90_DAYS`, by `day`, `traffic_source`, `video`, `country` or `device` (data lags ~2 days) |
+
+**One-time setup**
+
+1. In the Google Cloud project used for the other Google servers, enable **YouTube Data API v3** and **YouTube Analytics API**, and add the scopes `youtube.readonly` and `yt-analytics.readonly` to the OAuth consent screen.
+2. `pip install google-auth-oauthlib`, then `python scripts/youtube-auth.py --business-key el-cuis` (same `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`). Sign in with the Google account that owns the channel. This saves `/ads-mcp/el-cuis/youtube/config` (add `--channel-id UC...` if the account manages several channels).
+3. Register it: `claude mcp add youtube -s local -- .venv/Scripts/python.exe servers/youtube/mcp_server.py`, or add a `youtube` entry to `claude_desktop_config.json` like `search-console`, then restart.
+
+## Social posting workflow
+
+Schedules the same video to Facebook, Instagram and TikTok in one slot, with a batch approval. Currently configured for El Cuis (`el-cuis`).
+
+**Profile file: `social/profiles/<business>.json`**
+
+| Key | Meaning |
+|-----|---------|
+| `businessKey`, `websiteDomain` | Business and the domain captions must link to (`https://` only) |
+| `serviceCities` | Cities a caption may mention (at least one required) |
+| `readyFolder` | Local folder scanned for new `.mp4`/`.mov` videos |
+| `baselineCutoff` | Files created before this are baseline (already posted) and never scheduled |
+| `hookMaxChars` | Max length of the caption's first line (default 150) |
+| `alwaysHashtags` | Hashtags every caption should carry |
+| `slots` | `weekdayWindow`, `weekdayDefault`, `weekend` window (Pacific), `horizonDays` to plan ahead, `minLeadMinutes` before a slot can be used |
+| `platforms` | Platforms each video goes to |
+
+Override the directory with `ADS_MCP_SOCIAL_PROFILES_DIR` (tests do).
+
+**Caption rules.** When a profile exists for the request's `businessKey`, the Facebook, Instagram and TikTok schedule tools add blocking rule checks: `caption-hook` (first line is text, within `hookMaxChars`), `caption-https-link` (an `https://` link to `websiteDomain`, no `http://`), `caption-hashtags` (at least one), `caption-city` (mentions a service city). Businesses without a profile are unaffected.
+
+**Posting log.** On execute, the schedule tools record each post in S3 at `ledger/<business>.json`, keyed by song, with per-platform state (`queued`, `failed`, `cancelled`), scheduled time and file SHA-256. Cancelling marks the entry cancelled, and the runner marks an Instagram/TikTok entry that permanently fails as `failed` so the next run offers it again. Log write failures never fail the schedule call.
+
+**`social` MCP server** (`servers/social/`, read-only):
+
+| Tool | What it does |
+|------|--------------|
+| `social_find_new_videos` | New videos in the Ready folder, excluding baseline files and songs already in the log |
+| `social_next_open_slots` | Open posting slots from the profile, skipping those already taken |
+| `social_get_posting_log` | The S3 posting log |
+
+`meta_ads_get_organic_insights(business_key, days=30)` (meta-ads, read-only) returns Instagram and Facebook post performance, Instagram audience by Pacific hour, a `recommendedWeekdayTime` (`HH:00`) with `recommendationReason`, and `warnings`.
+
+**Register the servers for Claude Code** (from the repo root; `-s local` keeps them out of git):
+
+```bash
+claude mcp add google-ads -s local -- .venv/Scripts/python.exe servers/google-ads/mcp_server.py
+claude mcp add meta-ads -s local -- .venv/Scripts/python.exe servers/meta-ads/local_stdio.py
+claude mcp add tiktok -s local -- .venv/Scripts/python.exe servers/tiktok/local_stdio.py
+claude mcp add analytics -s local -- .venv/Scripts/python.exe servers/analytics/mcp_server.py
+claude mcp add search-console -s local -- .venv/Scripts/python.exe servers/search-console/mcp_server.py
+claude mcp add social -s local -- .venv/Scripts/python.exe servers/social/local_stdio.py
+```
+
+`meta-ads`, `tiktok` and `social` need `ADS_MCP_MEDIA_BUCKET` (and AWS credentials) in `.env` for the queue and the log.
+
+**Run it.** In Claude Code say **"schedule new videos"** (the `/schedule-social` skill). It finds new videos, pulls organic insights, writes bilingual captions, assigns slots, shows one batch dry-run preview, and queues everything only after you approve.
+
+**Baseline songs.** A new cut of a baseline song is flagged `possibleRepeat` only while the baseline files stay in the Ready folder; baseline songs are not recorded in the log, so moving those files out removes the check.
+
+**Limits.** Instagram Reels are capped at **300 MB** (the dry run is blocked above it). TikTok drafts carry **no caption**: paste it from `tiktok_list_scheduled` when you tap Post.
+
 ## Docs
 
 - `CLAUDE.md` — source of truth for all agents and MCP servers

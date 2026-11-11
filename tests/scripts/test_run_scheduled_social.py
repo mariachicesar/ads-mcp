@@ -272,3 +272,113 @@ def test_stale_tiktok_processing_names_tiktok(fake_s3):
     runner.run_once(now=NOW, publishers={})
 
     assert _states(fake_s3)["failed"][0]["lastError"] == "stale processing; check the TikTok inbox before retrying"
+
+
+# ── posting log (spec 7b) ───────────────────────────────────────────────────
+
+from shared import social_ledger  # noqa: E402
+
+
+def _entry_id(key: str) -> str:
+    return key.rsplit("-", 1)[-1].removesuffix(".json")
+
+
+def _log_queued(ref: str, platform: str = "instagram") -> None:
+    social_ledger.mark("el-cuis", song_key="reloj", sha256="x", platform=platform, state="queued",
+                       scheduled_at="2026-11-12T20:20:00Z", ref=ref)
+
+
+def _logged(platform: str = "instagram") -> dict:
+    return social_ledger.load("el-cuis")["songs"]["reloj"]["platforms"][platform]
+
+
+def _hard_fail():
+    return AdsMcpError(status_code=502, error_code="UPSTREAM_ERROR", message="bad video", retryable=False)
+
+
+def test_permanent_failure_marks_ledger_failed(fake_s3, social_profile_dir):
+    entry_id = _entry_id(_enqueue(NOW - timedelta(minutes=5)))
+    _log_queued(entry_id)
+
+    runner.run_once(now=NOW, publishers={"instagram": Publisher(_hard_fail())})
+
+    assert (_logged()["state"], _logged()["ref"]) == ("failed", entry_id)
+
+
+def test_missed_post_marks_ledger_failed(fake_s3, social_profile_dir):
+    entry_id = _entry_id(_enqueue(NOW - timedelta(hours=25)))
+    _log_queued(entry_id)
+
+    runner.run_once(now=NOW, publishers={"instagram": Publisher()})
+
+    assert _logged()["state"] == "failed"
+
+
+def test_retry_does_not_mark_ledger(fake_s3, social_profile_dir):
+    entry_id = _entry_id(_enqueue(NOW - timedelta(minutes=5)))
+    _log_queued(entry_id)
+
+    runner.run_once(now=NOW, publishers={"instagram": Publisher(_transient())})
+
+    assert _logged()["state"] == "queued"
+
+
+def test_failure_keeps_ledger_record_of_another_entry(fake_s3, social_profile_dir):
+    _enqueue(NOW - timedelta(minutes=5))
+    _log_queued("newer-entry")
+
+    runner.run_once(now=NOW, publishers={"instagram": Publisher(_hard_fail())})
+
+    assert (_logged()["state"], _logged()["ref"]) == ("queued", "newer-entry")
+
+
+def test_failure_without_profile_or_logged_song_writes_no_ledger(fake_s3, social_profile_dir, monkeypatch):
+    _enqueue(NOW - timedelta(minutes=5))  # no song holds sha "x"
+    runner.run_once(now=NOW, publishers={"instagram": Publisher(_hard_fail())})
+    assert not any(k.startswith("ledger/") for k in fake_s3.objects)
+
+    monkeypatch.setattr(runner, "load_profile", lambda key: None)
+    entry_id = _entry_id(_enqueue(NOW - timedelta(minutes=5)))
+    _log_queued(entry_id)
+    runner.run_once(now=NOW, publishers={"instagram": Publisher(_hard_fail())})
+    assert _logged()["state"] == "queued"
+
+
+def test_ledger_error_never_affects_publishing(fake_s3, social_profile_dir, monkeypatch):
+    _enqueue(NOW - timedelta(minutes=5))
+    _enqueue(NOW - timedelta(minutes=4))
+
+    def broken(*a, **kw):
+        raise RuntimeError("s3 down")
+
+    monkeypatch.setattr(social_ledger, "song_for_sha", broken)
+    counts = runner.run_once(now=NOW, publishers={"instagram": Publisher(_hard_fail(), {"mediaId": "m2"})})
+
+    states = _states(fake_s3)
+    assert counts["failed"] == 1 and counts["published"] == 1
+    assert states["failed"][0]["lastError"] == "bad video" and len(states["done"]) == 1
+
+
+# Unknown outcome: the post may already be live, so the log keeps "queued" and the
+# next scan never re-offers it (no double post). The queue still shows the failure.
+
+def test_stale_processing_keeps_ledger_queued(fake_s3, social_profile_dir):
+    key = _enqueue(NOW - timedelta(minutes=90))
+    entry_id = _entry_id(key)
+    _log_queued(entry_id)
+    media_queue.move(key, "processing", updates={"claimedAt": (NOW - timedelta(minutes=61)).strftime("%Y-%m-%dT%H:%M:%SZ")})
+
+    runner.run_once(now=NOW, publishers={})
+
+    assert len(_states(fake_s3)["failed"]) == 1
+    assert (_logged()["state"], _logged()["ref"]) == ("queued", entry_id)
+
+
+def test_unknown_exception_keeps_ledger_queued(fake_s3, social_profile_dir):
+    entry_id = _entry_id(_enqueue(NOW - timedelta(minutes=5)))
+    _log_queued(entry_id)
+
+    runner.run_once(now=NOW, publishers={"instagram": Publisher(RuntimeError("connection reset"))})
+
+    assert len(_states(fake_s3)["failed"]) == 1
+    assert _logged()["state"] == "queued"

@@ -8,6 +8,7 @@ Rules (see docs/superpowers/plans/2026-11-10-instagram-scheduled-reels.md):
 - claim pending → processing before calling the platform (no double posts).
 - retryable platform error → back to pending, up to 3 attempts; otherwise failed.
 - processing older than 1 h → failed, never auto-reposted.
+- a failed entry is marked failed in the posting log (best effort) so the next run offers it again.
 
 Exit codes: 0 = nothing failed this run, 1 = at least one post failed.
 """
@@ -23,11 +24,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from shared import media_queue, secrets, tiktok_client  # noqa: E402
+from shared import media_queue, secrets, social_ledger, tiktok_client  # noqa: E402
 from shared.config import get_settings  # noqa: E402
 from shared.errors import AdsMcpError  # noqa: E402
 from shared.instagram_publish import publish_reel  # noqa: E402
 from shared.runtime_config import load_meta_ads_config  # noqa: E402
+from shared.social_profile import load_profile  # noqa: E402
 
 log = logging.getLogger("run-scheduled-social")
 
@@ -76,10 +78,34 @@ def publish_tiktok_entry(entry: dict[str, Any]) -> dict[str, Any]:
     return {**sent, "note": note}
 
 
-def _fail(key: str, entry: dict[str, Any], reason: str, counts: dict[str, int], **updates: Any) -> None:
+def _log_failed(entry: dict[str, Any]) -> None:
+    """Mark this entry's platform failed in the posting log; never affects publishing.
+
+    Only this entry's own record is replaced (expected_ref), so a newer queued post of the
+    same song is never clobbered.
+    """
+    try:
+        business_key, sha, platform = entry.get("businessKey"), entry.get("videoSha256"), entry.get("platform")
+        if not business_key or not sha or platform not in social_ledger.PLATFORMS or load_profile(business_key) is None:
+            return
+        song = social_ledger.song_for_sha(business_key, sha)
+        if song is None:
+            return
+        social_ledger.mark(business_key, song_key=song, sha256=sha, platform=platform, state="failed",
+                           scheduled_at=entry.get("scheduledAt"), ref=entry.get("id"), expected_ref=entry.get("id") or "")
+    except Exception:  # noqa: BLE001
+        log.exception("could not record failed %s %s in the posting log", entry.get("platform"), entry.get("id"))
+
+
+def _fail(key: str, entry: dict[str, Any], reason: str, counts: dict[str, int], *, definite: bool = True,
+          **updates: Any) -> None:
+    """Move the entry to failed. definite=False means the post may already be live (stale claim,
+    unknown exception): the posting log then stays "queued" so the next scan never re-offers it."""
     media_queue.move(key, "failed", updates={"lastError": reason, **updates})
     counts["failed"] += 1
     log.error("failed %s %s (%s): %s", entry.get("platform"), entry.get("id"), entry.get("businessKey"), reason)
+    if definite:
+        _log_failed(entry)
 
 
 def _reason(exc: AdsMcpError) -> str:
@@ -91,7 +117,7 @@ def _handle_processing(entry: dict[str, Any], now: datetime, counts: dict[str, i
     claimed = entry.get("claimedAt")
     if claimed and now - _parse(claimed) > STALE_PROCESSING_AFTER:
         platform = {"instagram": "Instagram", "tiktok": "the TikTok inbox"}.get(entry.get("platform"), "the platform")
-        _fail(entry["_key"], entry, f"stale processing; check {platform} before retrying", counts)
+        _fail(entry["_key"], entry, f"stale processing; check {platform} before retrying", counts, definite=False)
 
 
 def _handle_pending(entry: dict[str, Any], now: datetime, publishers: dict[str, Publisher], counts: dict[str, int]) -> None:
@@ -124,7 +150,7 @@ def _handle_pending(entry: dict[str, Any], now: datetime, publishers: dict[str, 
             _fail(key, entry, reason, counts, attempts=attempts, errorDetails=exc.details)
         return
     except Exception as exc:  # noqa: BLE001 - unknown state; never retry automatically
-        _fail(key, entry, f"{type(exc).__name__}: {exc}", counts, attempts=attempts)
+        _fail(key, entry, f"{type(exc).__name__}: {exc}", counts, definite=False, attempts=attempts)
         return
 
     media_queue.move(key, "done", updates={"attempts": attempts, "result": result, "publishedAt": _iso(now)})
@@ -144,7 +170,7 @@ def _guarded(entry: dict[str, Any], counts: dict[str, int], handler: Callable[[]
     except Exception as exc:  # noqa: BLE001
         log.exception("error handling %s", entry.get("_key"))
         try:
-            _fail(entry["_key"], entry, f"runner error: {type(exc).__name__}: {exc}", counts)
+            _fail(entry["_key"], entry, f"runner error: {type(exc).__name__}: {exc}", counts, definite=False)
         except Exception:  # noqa: BLE001 - already moved, or S3 down; next run retries the cleanup
             log.exception("could not mark %s failed", entry.get("_key"))
 

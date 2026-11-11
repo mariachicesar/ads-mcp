@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from datetime import datetime, timezone
 
 import pytest
 
 from shared import approval_store
 from shared.errors import AdsMcpError
 from shared.models import ToolRequest
+from tests.fake_s3 import fake_s3  # noqa: F401  (fixture)
 from tests.service_import import load_service_module
+from tests.social_fixtures import GOOD
 
 publish = load_service_module("meta-ads", "tools.publish")
 
@@ -111,7 +115,6 @@ def test_video_source_rejects_wrong_extension_and_oversize(tmp_path, monkeypatch
 
 # ── scheduling helpers + schedule_page_video ─────────────────────────────────
 
-from datetime import datetime, timezone  # noqa: E402
 
 NOW = datetime(2026, 11, 10, 16, 0, tzinfo=timezone.utc)  # 08:00 PST
 NOON_NOV12_PT = 1794513600  # 2026-11-12T12:00:00-08:00
@@ -286,3 +289,80 @@ def test_list_scheduled_page_videos_accepts_graph_datetime_strings(publish_env, 
 
     assert [v["id"] for v in videos] == ["early", "late"]
     assert videos[1]["scheduledPacific"] == "2026-11-13T12:00:00-08:00"
+
+
+# ── caption rules (profiled businesses) ──────────────────────────────────────
+
+
+CAPTION_RULES = {"caption-hook", "caption-https-link", "caption-hashtags", "caption-city"}
+
+
+@pytest.mark.parametrize("tool", ["schedule_page_video", "schedule_page_reel"])
+def test_page_tools_block_caption_without_link(tool, reel_env, social_profile_dir, fixed_now, tmp_path):
+    r = getattr(publish, tool)(_req(_sched(tmp_path)), None)
+
+    assert "approvalId" not in r
+    assert r["summary"].startswith("Blocked by business rules")
+    assert any(c["rule"] == "caption-https-link" and not c["passed"] for c in r["ruleChecks"])
+
+
+@pytest.mark.parametrize("tool", ["schedule_page_video", "schedule_page_reel"])
+def test_page_tools_pass_good_caption(tool, reel_env, social_profile_dir, fixed_now, tmp_path):
+    r = getattr(publish, tool)(_req(_sched(tmp_path, description=GOOD)), None)
+
+    assert r["approvalId"]
+    caption_checks = [c for c in r["ruleChecks"] if c["rule"] in CAPTION_RULES]
+    assert {c["rule"] for c in caption_checks} == CAPTION_RULES and all(c["passed"] for c in caption_checks)
+
+
+# ── posting log ──────────────────────────────────────────────────────────────
+
+
+
+
+@pytest.mark.parametrize("tool,ref", [("schedule_page_video", "new-video"), ("schedule_page_reel", "vid1")])
+def test_page_tools_execute_mark_ledger_queued(tool, ref, reel_env, fake_s3, social_profile_dir, fixed_now, tmp_path):
+    payload = _sched(tmp_path, description=GOOD)
+    dry = getattr(publish, tool)(_req(payload), None)
+    getattr(publish, tool)(_req(payload, dry["approvalId"]), None)
+
+    p = json.loads(fake_s3.objects["ledger/el-cuis.json"])["songs"]["a"]["platforms"]["facebook"]
+    assert p["state"] == "queued" and p["ref"] == ref
+    assert p["scheduledAt"] == "2026-11-12T20:00:00Z"
+
+
+def test_page_reel_failure_marks_ledger_failed(reel_env, fake_s3, social_profile_dir, fixed_now, tmp_path):
+    reel_env["finish_error"] = AdsMcpError(status_code=502, error_code="UPSTREAM_ERROR", message="boom", tool="t")
+    payload = _sched(tmp_path, description=GOOD)
+    dry = publish.schedule_page_reel(_req(payload), None)
+    with pytest.raises(AdsMcpError):
+        publish.schedule_page_reel(_req(payload, dry["approvalId"]), None)
+
+    assert json.loads(fake_s3.objects["ledger/el-cuis.json"])["songs"]["a"]["platforms"]["facebook"]["state"] == "failed"
+
+
+def test_page_reel_ledger_write_failure_returns_warning(reel_env, fake_s3, social_profile_dir, fixed_now, tmp_path):
+    payload = _sched(tmp_path, description=GOOD)
+    dry = publish.schedule_page_reel(_req(payload), None)
+    real_put = fake_s3.put_object
+
+    def put_object(**kw):
+        if kw["Key"].startswith("ledger/"):
+            raise RuntimeError("s3 down")
+        return real_put(**kw)
+
+    fake_s3.put_object = put_object
+    done = publish.schedule_page_reel(_req(payload, dry["approvalId"]), None)
+
+    result = done["data"]["result"]
+    assert result["videoId"] == "vid1"
+    assert "posting log was not updated" in result["ledgerWarning"]
+    assert "ledger/el-cuis.json" not in fake_s3.objects
+
+
+def test_page_tools_without_profile_write_no_ledger(reel_env, fake_s3, fixed_now, tmp_path):
+    payload = _sched(tmp_path)
+    dry = publish.schedule_page_video(_req(payload), None)
+    publish.schedule_page_video(_req(payload, dry["approvalId"]), None)
+
+    assert not any(k.startswith("ledger/") for k in fake_s3.objects)

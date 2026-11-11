@@ -7,7 +7,7 @@ import pytest
 
 from shared import approval_store, media_queue
 from shared.models import ToolRequest
-from tests.fake_s3 import fake_s3  # noqa: F401  (fixture)
+from tests.fake_s3 import PreconditionFailed, fake_s3  # noqa: F401  (fixture)
 from tests.service_import import load_service_module
 
 NOW = datetime(2026, 11, 10, 16, 0, tzinfo=timezone.utc)  # 08:00 PST
@@ -137,3 +137,93 @@ def test_meta_publish_helpers_still_importable():
     assert publish._parse_schedule_time is scheduling.parse_schedule_time
     assert publish._sha256 is scheduling.sha256_file
     assert callable(publish._schedule_window_check)
+
+
+# ── caption rules (profiled businesses) ──────────────────────────────────────
+
+from tests.social_fixtures import GOOD  # noqa: E402
+
+CAPTION_RULES = {"caption-hook", "caption-https-link", "caption-hashtags", "caption-city"}
+
+
+def test_inbox_video_blocks_caption_without_link(tt_env, fixed_now, social_profile_dir, tmp_path):
+    r = tt_env["mod"].schedule_inbox_video(_req(_payload(tmp_path)), None)
+
+    assert "approvalId" not in r
+    assert r["summary"].startswith("Blocked by business rules")
+    assert any(c["rule"] == "caption-https-link" and not c["passed"] for c in r["ruleChecks"])
+
+
+def test_inbox_video_missing_caption_blocked_with_profile(tt_env, fixed_now, social_profile_dir, tmp_path):
+    payload = _payload(tmp_path)
+    del payload["caption"]
+    r = tt_env["mod"].schedule_inbox_video(_req(payload), None)
+
+    assert "approvalId" not in r
+    assert any(c["rule"] == "caption-hook" and not c["passed"] for c in r["ruleChecks"])
+
+
+def test_inbox_video_passes_good_caption(tt_env, fixed_now, social_profile_dir, tmp_path):
+    r = tt_env["mod"].schedule_inbox_video(_req(_payload(tmp_path, caption=GOOD)), None)
+
+    assert r["approvalId"]
+    caption_checks = [c for c in r["ruleChecks"] if c["rule"] in CAPTION_RULES]
+    assert {c["rule"] for c in caption_checks} == CAPTION_RULES and all(c["passed"] for c in caption_checks)
+
+
+# ── posting log ──────────────────────────────────────────────────────────────
+
+from shared import social_ledger  # noqa: E402
+
+
+def _ledger(s3):
+    return json.loads(s3.objects["ledger/el-cuis.json"])
+
+
+def test_tiktok_execute_marks_ledger_queued(tt_env, fixed_now, social_profile_dir, tmp_path):
+    mod = tt_env["mod"]
+    payload = _payload(tmp_path, caption=GOOD)
+    dry = mod.schedule_inbox_video(_req(payload), None)
+    done = mod.schedule_inbox_video(_req(payload, dry["approvalId"]), None)
+
+    p = _ledger(tt_env["s3"])["songs"]["clip"]["platforms"]["tiktok"]
+    assert p["state"] == "queued" and p["scheduledAt"] == "2026-11-13T02:00:00Z"
+    assert p["ref"] == done["data"]["result"]["entryId"]
+
+
+def test_tiktok_execute_without_profile_writes_no_ledger(tt_env, fixed_now, tmp_path):
+    mod = tt_env["mod"]
+    payload = _payload(tmp_path)
+    dry = mod.schedule_inbox_video(_req(payload), None)
+    mod.schedule_inbox_video(_req(payload, dry["approvalId"]), None)
+
+    assert not any(k.startswith("ledger/") for k in tt_env["s3"].objects)
+
+
+def test_cancel_marks_ledger_cancelled(tt_env, social_profile_dir):
+    entry_id = json.loads(tt_env["s3"].objects[_seed()])["id"]
+    social_ledger.mark("el-cuis", song_key="x", sha256="abc", platform="tiktok", state="queued",
+                       scheduled_at="2026-11-13T02:00:00Z", ref=entry_id)
+    mod = tt_env["mod"]
+    dry = mod.cancel_scheduled(_req({"entryId": entry_id}), None)
+    mod.cancel_scheduled(_req({"entryId": entry_id}, dry["approvalId"]), None)
+
+    p = _ledger(tt_env["s3"])["songs"]["x"]["platforms"]["tiktok"]
+    assert p["state"] == "cancelled" and p["ref"] == entry_id
+
+
+def test_tiktok_execute_ledger_failure_still_returns_result(tt_env, fixed_now, social_profile_dir, tmp_path):
+    mod = tt_env["mod"]
+    payload = _payload(tmp_path, caption=GOOD)
+    dry = mod.schedule_inbox_video(_req(payload), None)
+    real = tt_env["s3"].put_object
+
+    def put(**kw):
+        if kw["Key"].startswith("ledger/"):
+            raise PreconditionFailed("race")
+        return real(**kw)
+
+    tt_env["s3"].put_object = put
+    done = mod.schedule_inbox_video(_req(payload, dry["approvalId"]), None)
+
+    assert done["data"]["result"]["entryId"] and "ledgerWarning" in done["data"]["result"]

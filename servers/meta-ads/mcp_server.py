@@ -28,6 +28,7 @@ from tools.read import (
     get_adset_performance,
     get_audience_performance,
     get_campaign_performance,
+    get_organic_insights,
     get_publisher_platform_breakdown,
     list_ad_accounts,
     list_creative_assets,
@@ -101,6 +102,13 @@ def meta_ads_get_audience_performance(business_key: Annotated[str, Field(descrip
     """Get age and gender, optionally country, performance breakdowns."""
     request = ToolRequest(businessKey=business_key, payload={"level": level, "dateRange": date_range, "includeCountry": include_country})
     return _run_tool("get_audience_performance", lambda: get_audience_performance(request, None))
+
+
+@mcp.tool()
+def meta_ads_get_organic_insights(business_key: Annotated[str, Field(description="Business key")], days: Annotated[int, Field(description="Look-back window in days", ge=1, le=90)] = 30) -> dict:
+    """Read-only organic Instagram and Facebook post insights plus the best weekday posting time (Pacific)."""
+    request = ToolRequest(businessKey=business_key, payload={"days": days})
+    return _run_tool("get_organic_insights", lambda: get_organic_insights(request, None))
 
 
 @mcp.tool()

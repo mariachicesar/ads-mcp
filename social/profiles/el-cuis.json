@@ -1,0 +1,11 @@
+{
+  "businessKey": "el-cuis",
+  "websiteDomain": "mariachielcuis.com",
+  "serviceCities": ["Beverly Hills", "Whittier", "Downey", "Pasadena", "La Habra", "Altadena", "West Hollywood", "Hollywood", "Santa Monica", "Compton"],
+  "readyFolder": "C:\\Users\\cesar\\Desktop\\Mariachi\\Assets\\Ready",
+  "baselineCutoff": "2026-11-10T19:00:00-08:00",
+  "hookMaxChars": 150,
+  "alwaysHashtags": ["#mariachi", "#mariachiloscangeles", "#mariachielcuis"],
+  "slots": {"weekdayWindow": ["18:00", "21:00"], "weekdayDefault": "19:00", "weekend": ["10:00", "15:00"], "horizonDays": 7, "minLeadMinutes": 60},
+  "platforms": ["facebook", "instagram", "tiktok"]
+}

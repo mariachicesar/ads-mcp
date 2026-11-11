@@ -5,11 +5,12 @@ from datetime import datetime, timezone
 
 import pytest
 
-from shared import approval_store, media_queue
+from shared import approval_store, media_queue, social_ledger
 from shared.errors import AdsMcpError
 from shared.models import ToolRequest
-from tests.fake_s3 import fake_s3  # noqa: F401  (fixture)
+from tests.fake_s3 import PreconditionFailed, fake_s3  # noqa: F401  (fixture)
 from tests.service_import import load_service_module
+from tests.social_fixtures import GOOD
 
 instagram = load_service_module("meta-ads", "tools.instagram")
 
@@ -168,3 +169,120 @@ def test_schedule_rejects_video_over_instagram_limit(ig_env, tmp_path, monkeypat
     with pytest.raises(AdsMcpError) as exc:
         instagram.schedule_instagram_reel(_req(_payload(tmp_path)), None)
     assert exc.value.error_code == "REQUEST_INVALID" and "300 MB" in exc.value.message
+
+
+# ── caption rules (profiled businesses) ──────────────────────────────────────
+
+
+CAPTION_RULES = {"caption-hook", "caption-https-link", "caption-hashtags", "caption-city"}
+
+
+def test_schedule_instagram_reel_blocks_caption_without_link(ig_env, social_profile_dir, tmp_path):
+    r = instagram.schedule_instagram_reel(_req(_payload(tmp_path)), None)
+
+    assert "approvalId" not in r
+    assert r["summary"].startswith("Blocked by business rules")
+    assert any(c["rule"] == "caption-https-link" and not c["passed"] for c in r["ruleChecks"])
+
+
+def test_schedule_instagram_reel_passes_good_caption(ig_env, social_profile_dir, tmp_path):
+    r = instagram.schedule_instagram_reel(_req(_payload(tmp_path, caption=GOOD)), None)
+
+    assert r["approvalId"]
+    caption_checks = [c for c in r["ruleChecks"] if c["rule"] in CAPTION_RULES]
+    assert {c["rule"] for c in caption_checks} == CAPTION_RULES and all(c["passed"] for c in caption_checks)
+
+
+# ── posting log ──────────────────────────────────────────────────────────────
+
+
+
+def _ledger(s3):
+    return json.loads(s3.objects["ledger/el-cuis.json"])
+
+
+def test_instagram_execute_marks_ledger_queued(ig_env, social_profile_dir, tmp_path):
+    payload = _payload(tmp_path, caption=GOOD)
+    dry = instagram.schedule_instagram_reel(_req(payload), None)
+    done = instagram.schedule_instagram_reel(_req(payload, dry["approvalId"]), None)
+
+    p = _ledger(ig_env["s3"])["songs"]["reel"]["platforms"]["instagram"]
+    assert p["state"] == "queued" and p["scheduledAt"] == "2026-11-13T02:00:00Z"
+    assert p["ref"] == done["data"]["result"]["entryId"]
+
+
+def test_instagram_execute_failure_marks_ledger_failed(ig_env, social_profile_dir, tmp_path, monkeypatch):
+    payload = _payload(tmp_path, caption=GOOD)
+    dry = instagram.schedule_instagram_reel(_req(payload), None)
+
+    def boom(**kw):
+        raise RuntimeError("s3 down")
+
+    monkeypatch.setattr(instagram.media_queue, "put_video", boom)
+    with pytest.raises(RuntimeError):
+        instagram.schedule_instagram_reel(_req(payload, dry["approvalId"]), None)
+
+    assert _ledger(ig_env["s3"])["songs"]["reel"]["platforms"]["instagram"]["state"] == "failed"
+
+
+def test_instagram_execute_without_profile_writes_no_ledger(ig_env, tmp_path):
+    payload = _payload(tmp_path)
+    dry = instagram.schedule_instagram_reel(_req(payload), None)
+    instagram.schedule_instagram_reel(_req(payload, dry["approvalId"]), None)
+
+    assert not any(k.startswith("ledger/") for k in ig_env["s3"].objects)
+
+
+def test_cancel_marks_ledger_cancelled(ig_env, social_profile_dir):
+    _, entry_id = _queued()
+    social_ledger.mark("el-cuis", song_key="x", sha256="x", platform="instagram", state="queued",
+                       scheduled_at="2026-11-13T02:00:00Z", ref=entry_id)
+    dry = instagram.cancel_scheduled_social(_req({"entryId": entry_id}), None)
+    instagram.cancel_scheduled_social(_req({"entryId": entry_id}, dry["approvalId"]), None)
+
+    p = _ledger(ig_env["s3"])["songs"]["x"]["platforms"]["instagram"]
+    assert p["state"] == "cancelled" and p["ref"] == entry_id
+
+
+def test_cancel_old_entry_keeps_newer_queued_record(ig_env, social_profile_dir):
+    _, entry_id = _queued()
+    social_ledger.mark("el-cuis", song_key="x", sha256="x", platform="instagram", state="queued",
+                       scheduled_at="2026-11-14T02:00:00Z", ref="newer-entry")
+    dry = instagram.cancel_scheduled_social(_req({"entryId": entry_id}), None)
+    instagram.cancel_scheduled_social(_req({"entryId": entry_id}, dry["approvalId"]), None)
+
+    p = _ledger(ig_env["s3"])["songs"]["x"]["platforms"]["instagram"]
+    assert (p["state"], p["ref"]) == ("queued", "newer-entry")
+
+
+def _break_ledger_writes(s3):
+    real = s3.put_object
+
+    def put(**kw):
+        if kw["Key"].startswith("ledger/"):
+            raise PreconditionFailed("race")
+        return real(**kw)
+
+    s3.put_object = put
+
+
+def test_instagram_execute_ledger_failure_still_returns_result(ig_env, social_profile_dir, tmp_path):
+    payload = _payload(tmp_path, caption=GOOD)
+    dry = instagram.schedule_instagram_reel(_req(payload), None)
+    _break_ledger_writes(ig_env["s3"])
+    done = instagram.schedule_instagram_reel(_req(payload, dry["approvalId"]), None)
+
+    result = done["data"]["result"]
+    assert result["entryId"] and "ledgerWarning" in result
+
+
+def test_instagram_cancel_ledger_failure_still_returns_result(ig_env, social_profile_dir):
+    _, entry_id = _queued()
+    social_ledger.mark("el-cuis", song_key="x", sha256="x", platform="instagram", state="queued",
+                       scheduled_at="2026-11-13T02:00:00Z", ref=entry_id)
+    dry = instagram.cancel_scheduled_social(_req({"entryId": entry_id}), None)
+    _break_ledger_writes(ig_env["s3"])
+    done = instagram.cancel_scheduled_social(_req({"entryId": entry_id}, dry["approvalId"]), None)
+
+    assert "ledgerWarning" in done["data"]["result"]
+    assert any(k.startswith("queue/cancelled/") for k in ig_env["s3"].objects)

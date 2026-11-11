@@ -1,6 +1,8 @@
-"""TikTok MCP server — schedule videos into the TikTok app inbox via the S3 queue.
+"""TikTok MCP server — schedule videos into the TikTok app inbox via the S3 queue,
+and read account/video stats.
 
-These tools only touch S3; scripts/run-scheduled-social.py talks to TikTok.
+The schedule tools only touch S3 (scripts/run-scheduled-social.py talks to TikTok);
+the read-only stats tools call TikTok's Display API directly.
 
 Run via stdio:
     python servers/tiktok/local_stdio.py
@@ -20,6 +22,7 @@ from pydantic import Field
 
 from shared.errors import AdsMcpError
 from shared.models import ToolRequest
+from tools.analytics import get_account_stats, get_video_stats
 from tools.schedule import SERVICE_NAME, cancel_scheduled, list_scheduled, schedule_inbox_video
 
 mcp = FastMCP(
@@ -30,7 +33,8 @@ mcp = FastMCP(
         "so show the saved caption from tiktok_list_scheduled. Write tools: call first WITHOUT "
         "approval_id to get a dry-run preview and an approvalId, show the preview to the user, and only "
         "call again with that approval_id and the exact same arguments after explicit confirmation. "
-        "approvalIds expire after 15 minutes."
+        "approvalIds expire after 15 minutes. tiktok_get_account_stats and tiktok_get_video_stats are "
+        "read-only and return lifetime counts (TikTok's API has no per-day views or traffic sources)."
     ),
 )
 
@@ -98,6 +102,25 @@ def tiktok_cancel_scheduled(
     """
     request = _write_request(business_key, approval_id, {"entryId": entry_id})
     return _run_tool("tiktok_cancel_scheduled", lambda: cancel_scheduled(request, None))
+
+
+@mcp.tool()
+def tiktok_get_account_stats(business_key: _BK) -> dict:
+    """Read-only TikTok account totals: followers, following, total likes and video count."""
+    request = ToolRequest(businessKey=business_key, payload={})
+    return _run_tool("tiktok_get_account_stats", lambda: get_account_stats(request, None))
+
+
+@mcp.tool()
+def tiktok_get_video_stats(
+    business_key: _BK,
+    days: Annotated[int | None, Field(description="Only videos posted in the last N days (1-365); omit for the latest videos", ge=1, le=365)] = None,
+    limit: Annotated[int, Field(description="Max videos to fetch, newest first (1-100)", ge=1, le=100)] = 20,
+) -> dict:
+    """Read-only per-video TikTok stats (views, likes, comments, shares, engagement rate) with totals."""
+    payload = {"limit": limit} if days is None else {"limit": limit, "days": days}
+    request = ToolRequest(businessKey=business_key, payload=payload)
+    return _run_tool("tiktok_get_video_stats", lambda: get_video_stats(request, None))
 
 
 if __name__ == "__main__":

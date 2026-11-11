@@ -22,7 +22,7 @@ def test_auth_url_has_scopes_redirect_and_state():
     parsed = urlparse(url)
     q = {k: v[0] for k, v in parse_qs(parsed.query).items()}
     assert f"{parsed.scheme}://{parsed.netloc}{parsed.path}" == "https://www.tiktok.com/v2/auth/authorize/"
-    assert q == {"client_key": "ck123", "scope": "user.info.basic,video.upload", "response_type": "code",
+    assert q == {"client_key": "ck123", "scope": "user.info.basic,video.upload,user.info.stats,video.list", "response_type": "code",
                  "redirect_uri": REDIRECT, "state": "st8"}
 
 
