@@ -25,8 +25,9 @@ Read `servers/content-agent/brands/el-cuis.md` and `social/profiles/el-cuis.json
 Call `social_find_new_videos(business_key="el-cuis")` (server `social`).
 - No `candidates`: tell the user there is nothing new and STOP. Do not pull any data.
 - List `skipped` items and why.
-- `instagramTooLarge` candidate: ask for a re-export under 300 MB. Schedule Facebook + TikTok only for it if the user says so.
-- `possibleRepeat` candidate: ask the user to include or skip.
+- `instagramTooLarge` candidate: ask for a re-export under 300 MB. Until the user answers, Instagram is excluded for that file (Facebook + TikTok only).
+- `possibleRepeat` candidate: ask the user to include or skip. Until the user answers, it is excluded (skipped).
+- Collect the answers to these questions before step 8; dry-run only what the user included.
 - A candidate's `missingPlatforms` lists the platforms still to schedule (a failed platform from an earlier run is re-offered). Only dry-run those.
 
 ### 3. Best weekday hour
@@ -35,11 +36,11 @@ Call `meta_ads_get_organic_insights(business_key="el-cuis")`. Use `recommendedWe
 ### 4. Slots
 Call `social_next_open_slots(business_key="el-cuis", weekday_time=<recommendedWeekdayTime>)`. Assign candidates oldest-first to slots in order. Extra candidates wait for the next run (say so). Fewer candidates than slots is fine; leave slots empty.
 
-### 5. Demand data (last 28 days)
+### 5. Demand data (last ~4 weeks)
 Pull, each independently skippable:
-- `search_console_get_search_performance(business_key="el-cuis", date_range=<28 days>, dimension="query", limit=50)` and again with `dimension="page"`.
-- `google_ads_get_search_terms_report(business_key="el-cuis", date_range=<28 days>)`.
-- `analytics_get_top_pages(business_key="el-cuis", date_range=<28 days>, limit=20)`.
+- `search_console_get_search_performance(business_key="el-cuis", date_range="LAST_28_DAYS", dimension="query", limit=50)` and again with `dimension="page"`.
+- `google_ads_get_search_terms_report(business_key="el-cuis", date_range="LAST_30_DAYS")`.
+- `analytics_get_top_pages(business_key="el-cuis", date_range="LAST_28_DAYS", limit=20)`.
 
 Per video choose:
 - Event topic (quinceanera, wedding, birthday, etc.) from demand, matched to the song where sensible.
@@ -81,6 +82,8 @@ Record each `approvalId` and the rule checks. If any dry run is blocked or a rul
 
 ### 9. Batch preview
 Show one table per video: slot (Pacific), file, platforms, rule checks (hook, https link, hashtags, city) per platform, then the full caption underneath. Add notes: skipped files, repeats, size problems, data tools that were unavailable, and that TikTok drafts arrive in the inbox up to 30 minutes after the slot. Ask "Approve this batch?" and WAIT for one explicit batch approval. Approvals expire after 15 minutes, so do not execute from the old approvalIds.
+
+If the user changes a caption, time or file after seeing the preview, re-dry-run the changed posts on every platform and show them again for approval. Dropping a post needs no re-approval.
 
 ### 10. Execute, post by post
 For each post, in slot order, per platform:

@@ -449,7 +449,7 @@ Schedules the same video to Facebook, Instagram and TikTok in one slot, with a b
 | `businessKey`, `websiteDomain` | Business and the domain captions must link to (`https://` only) |
 | `serviceCities` | Cities a caption may mention (at least one required) |
 | `readyFolder` | Local folder scanned for new `.mp4`/`.mov` videos |
-| `baselineCutoff` | Files modified before this are baseline (already posted) and never scheduled |
+| `baselineCutoff` | Files created before this are baseline (already posted) and never scheduled |
 | `hookMaxChars` | Max length of the caption's first line (default 150) |
 | `alwaysHashtags` | Hashtags every caption should carry |
 | `slots` | `weekdayWindow`, `weekdayDefault`, `weekend` window (Pacific), `horizonDays` to plan ahead, `minLeadMinutes` before a slot can be used |
@@ -459,7 +459,7 @@ Override the directory with `ADS_MCP_SOCIAL_PROFILES_DIR` (tests do).
 
 **Caption rules.** When a profile exists for the request's `businessKey`, the Facebook, Instagram and TikTok schedule tools add blocking rule checks: `caption-hook` (first line is text, within `hookMaxChars`), `caption-https-link` (an `https://` link to `websiteDomain`, no `http://`), `caption-hashtags` (at least one), `caption-city` (mentions a service city). Businesses without a profile are unaffected.
 
-**Posting log.** On execute, the schedule tools record each post in S3 at `ledger/<business>.json`, keyed by song, with per-platform state (`queued`, `failed`, `cancelled`), scheduled time and file SHA-256. Cancelling marks the entry cancelled. Log write failures never fail the schedule call.
+**Posting log.** On execute, the schedule tools record each post in S3 at `ledger/<business>.json`, keyed by song, with per-platform state (`queued`, `failed`, `cancelled`), scheduled time and file SHA-256. Cancelling marks the entry cancelled, and the runner marks an Instagram/TikTok entry that permanently fails as `failed` so the next run offers it again. Log write failures never fail the schedule call.
 
 **`social` MCP server** (`servers/social/`, read-only):
 
@@ -474,14 +474,19 @@ Override the directory with `ADS_MCP_SOCIAL_PROFILES_DIR` (tests do).
 **Register the servers for Claude Code** (from the repo root; `-s local` keeps them out of git):
 
 ```bash
+claude mcp add google-ads -s local -- .venv/Scripts/python.exe servers/google-ads/mcp_server.py
+claude mcp add meta-ads -s local -- .venv/Scripts/python.exe servers/meta-ads/local_stdio.py
+claude mcp add tiktok -s local -- .venv/Scripts/python.exe servers/tiktok/local_stdio.py
 claude mcp add analytics -s local -- .venv/Scripts/python.exe servers/analytics/mcp_server.py
 claude mcp add search-console -s local -- .venv/Scripts/python.exe servers/search-console/mcp_server.py
 claude mcp add social -s local -- .venv/Scripts/python.exe servers/social/local_stdio.py
 ```
 
-`google-ads`, `meta-ads` and `tiktok` are registered as described above; `social` needs `ADS_MCP_MEDIA_BUCKET` (and AWS credentials) in `.env` to read the log.
+`meta-ads`, `tiktok` and `social` need `ADS_MCP_MEDIA_BUCKET` (and AWS credentials) in `.env` for the queue and the log.
 
 **Run it.** In Claude Code say **"schedule new videos"** (the `/schedule-social` skill). It finds new videos, pulls organic insights, writes bilingual captions, assigns slots, shows one batch dry-run preview, and queues everything only after you approve.
+
+**Baseline songs.** A new cut of a baseline song is flagged `possibleRepeat` only while the baseline files stay in the Ready folder; baseline songs are not recorded in the log, so moving those files out removes the check.
 
 **Limits.** Instagram Reels are capped at **300 MB** (the dry run is blocked above it). TikTok drafts carry **no caption**: paste it from `tiktok_list_scheduled` when you tap Post.
 
