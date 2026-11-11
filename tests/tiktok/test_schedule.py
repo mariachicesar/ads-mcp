@@ -201,9 +201,9 @@ def test_tiktok_execute_without_profile_writes_no_ledger(tt_env, fixed_now, tmp_
 
 
 def test_cancel_marks_ledger_cancelled(tt_env, social_profile_dir):
-    social_ledger.mark("el-cuis", song_key="x", sha256="abc", platform="tiktok", state="queued",
-                       scheduled_at="2026-11-13T02:00:00Z", ref="old")
     entry_id = json.loads(tt_env["s3"].objects[_seed()])["id"]
+    social_ledger.mark("el-cuis", song_key="x", sha256="abc", platform="tiktok", state="queued",
+                       scheduled_at="2026-11-13T02:00:00Z", ref=entry_id)
     mod = tt_env["mod"]
     dry = mod.cancel_scheduled(_req({"entryId": entry_id}), None)
     mod.cancel_scheduled(_req({"entryId": entry_id}, dry["approvalId"]), None)

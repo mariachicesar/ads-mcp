@@ -234,14 +234,25 @@ def test_instagram_execute_without_profile_writes_no_ledger(ig_env, tmp_path):
 
 
 def test_cancel_marks_ledger_cancelled(ig_env, social_profile_dir):
-    social_ledger.mark("el-cuis", song_key="x", sha256="x", platform="instagram", state="queued",
-                       scheduled_at="2026-11-13T02:00:00Z", ref="old")
     _, entry_id = _queued()
+    social_ledger.mark("el-cuis", song_key="x", sha256="x", platform="instagram", state="queued",
+                       scheduled_at="2026-11-13T02:00:00Z", ref=entry_id)
     dry = instagram.cancel_scheduled_social(_req({"entryId": entry_id}), None)
     instagram.cancel_scheduled_social(_req({"entryId": entry_id}, dry["approvalId"]), None)
 
     p = _ledger(ig_env["s3"])["songs"]["x"]["platforms"]["instagram"]
     assert p["state"] == "cancelled" and p["ref"] == entry_id
+
+
+def test_cancel_old_entry_keeps_newer_queued_record(ig_env, social_profile_dir):
+    _, entry_id = _queued()
+    social_ledger.mark("el-cuis", song_key="x", sha256="x", platform="instagram", state="queued",
+                       scheduled_at="2026-11-14T02:00:00Z", ref="newer-entry")
+    dry = instagram.cancel_scheduled_social(_req({"entryId": entry_id}), None)
+    instagram.cancel_scheduled_social(_req({"entryId": entry_id}, dry["approvalId"]), None)
+
+    p = _ledger(ig_env["s3"])["songs"]["x"]["platforms"]["instagram"]
+    assert (p["state"], p["ref"]) == ("queued", "newer-entry")
 
 
 def _break_ledger_writes(s3):
@@ -266,9 +277,9 @@ def test_instagram_execute_ledger_failure_still_returns_result(ig_env, social_pr
 
 
 def test_instagram_cancel_ledger_failure_still_returns_result(ig_env, social_profile_dir):
-    social_ledger.mark("el-cuis", song_key="x", sha256="x", platform="instagram", state="queued",
-                       scheduled_at="2026-11-13T02:00:00Z", ref="old")
     _, entry_id = _queued()
+    social_ledger.mark("el-cuis", song_key="x", sha256="x", platform="instagram", state="queued",
+                       scheduled_at="2026-11-13T02:00:00Z", ref=entry_id)
     dry = instagram.cancel_scheduled_social(_req({"entryId": entry_id}), None)
     _break_ledger_writes(ig_env["s3"])
     done = instagram.cancel_scheduled_social(_req({"entryId": entry_id}, dry["approvalId"]), None)

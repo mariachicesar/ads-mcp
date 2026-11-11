@@ -92,3 +92,78 @@ def test_mark_cancelled_noop_when_sha_unknown(fake_s3):
     social_ledger.mark_cancelled("el-cuis", sha256="zzz", platform="tiktok", scheduled_at=None, ref="x")
 
     assert not any(k.startswith("ledger/") for k in fake_s3.objects)
+
+
+def _platform(platform="instagram"):
+    return social_ledger.load("el-cuis")["songs"]["17anos"]["platforms"][platform]
+
+
+def test_mark_cancelled_skips_record_with_other_ref(fake_s3):
+    _mark(ref="live")  # the song was re-queued under a newer entry
+
+    social_ledger.mark_cancelled("el-cuis", sha256="aaa", platform="instagram", scheduled_at=None, ref="old")
+
+    assert (_platform()["state"], _platform()["ref"]) == ("queued", "live")
+
+
+@pytest.mark.parametrize("stored_ref", ["e1", None, ""])
+def test_mark_cancelled_marks_matching_or_empty_ref(fake_s3, stored_ref):
+    _mark(ref=stored_ref)
+
+    social_ledger.mark_cancelled("el-cuis", sha256="aaa", platform="instagram", scheduled_at=None, ref="e1")
+
+    assert _platform()["state"] == "cancelled"
+
+
+def test_failed_mark_never_replaces_queued(fake_s3):
+    _mark(ref="live")
+    _mark(state="failed", ref=None)
+
+    assert (_platform()["state"], _platform()["ref"]) == ("queued", "live")
+
+
+def test_failed_mark_replaces_failed_or_cancelled(fake_s3):
+    _mark(state="cancelled", ref="old")
+    _mark(state="failed", ref=None)
+
+    assert _platform()["state"] == "failed"
+
+
+def test_expected_ref_failed_replaces_own_queued_record_only(fake_s3):
+    _mark(ref="e1")
+    social_ledger.mark("el-cuis", song_key="17anos", sha256="aaa", platform="instagram", state="failed",
+                       scheduled_at=None, ref="other", expected_ref="other")
+    assert _platform()["state"] == "queued"
+
+    social_ledger.mark("el-cuis", song_key="17anos", sha256="aaa", platform="instagram", state="failed",
+                       scheduled_at=None, ref="e1", expected_ref="e1")
+    assert (_platform()["state"], _platform()["ref"]) == ("failed", "e1")
+
+
+def _run(call):
+    return social_ledger.run_and_mark("el-cuis", enabled=True, file_path="C:/v/17anos Reel.mp4", sha256="aaa",
+                                      platform="tiktok", scheduled_at="2026-11-13T02:00:00Z", call=call,
+                                      ref_of=lambda r: r["entryId"])
+
+
+def test_run_and_mark_success_with_ledger_failure_returns_warning(fake_s3, monkeypatch):
+    def broken(*a, **kw):
+        raise RuntimeError("s3 down")
+
+    monkeypatch.setattr(social_ledger, "mark", broken)
+    result = _run(lambda: {"entryId": "e9"})
+
+    assert result["entryId"] == "e9"
+    assert "posting log was not updated" in result["ledgerWarning"] and "s3 down" in result["ledgerWarning"]
+
+
+def test_run_and_mark_platform_error_survives_failed_mark_error(fake_s3, monkeypatch):
+    def broken(*a, **kw):
+        raise RuntimeError("s3 down")
+
+    def platform_call():
+        raise ValueError("platform said no")
+
+    monkeypatch.setattr(social_ledger, "mark", broken)
+    with pytest.raises(ValueError, match="platform said no"):
+        _run(platform_call)

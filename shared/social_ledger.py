@@ -74,8 +74,22 @@ def song_for_sha(business_key: str, sha256: str) -> str | None:
     return None
 
 
+def _may_replace(existing: dict[str, Any] | None, state: str, expected_ref: str | None) -> bool:
+    """Guard a live record: never let a stale mark overwrite another entry's state.
+
+    With expected_ref, only a record with no ref or that same ref may be replaced (the caller is
+    acting on that one entry). Without it, a failed mark never replaces a queued record.
+    """
+    if not existing:
+        return True
+    if expected_ref is not None:
+        return existing.get("ref") in (None, "", expected_ref)
+    return not (state == "failed" and existing.get("state") == "queued")
+
+
 def mark(business_key: str, *, song_key: str, sha256: str, platform: str, state: str,
-         scheduled_at: str | None, ref: str | None) -> None:
+         scheduled_at: str | None, ref: str | None, expected_ref: str | None = None) -> bool:
+    """Record a platform's state for a song; returns False if a guard kept the stored record."""
     if state not in STATES:
         raise ValueError(f"Unknown ledger state {state!r}.")
     if platform not in PLATFORMS:
@@ -84,6 +98,8 @@ def mark(business_key: str, *, song_key: str, sha256: str, platform: str, state:
     for attempt in range(MAX_ATTEMPTS):
         data, etag = _read(business_key)
         song = data["songs"].setdefault(song_key, {"files": [], "platforms": {}})
+        if not _may_replace(song["platforms"].get(platform), state, expected_ref):
+            return False
         if sha256 not in song["files"]:
             song["files"].append(sha256)
         song["platforms"][platform] = {
@@ -94,7 +110,7 @@ def mark(business_key: str, *, song_key: str, sha256: str, platform: str, state:
         try:
             client.put_object(Bucket=bucket, Key=_key(business_key), ContentType="application/json",
                               Body=json.dumps(data, ensure_ascii=False).encode("utf-8"), **condition)
-            return
+            return True
         except Exception as exc:  # noqa: BLE001
             if not _is_precondition_failure(exc) or attempt == MAX_ATTEMPTS - 1:
                 raise
@@ -134,6 +150,9 @@ def mark_cancelled(business_key: str, *, sha256: str | None, platform: str,
                    scheduled_at: str | None, ref: str | None) -> str | None:
     """Mark the platform cancelled for whichever song holds this sha; no-op if none does.
 
+    Only the record for this entry (same ref, or no ref) is marked, so cancelling an old entry
+    never clobbers a newer queued post of the same song.
+
     Best effort: returns a warning message if the log could not be updated, else None.
     """
     if not sha256:
@@ -143,7 +162,7 @@ def mark_cancelled(business_key: str, *, sha256: str | None, platform: str,
         if key is None:
             return None
         mark(business_key, song_key=key, sha256=sha256, platform=platform, state="cancelled",
-             scheduled_at=scheduled_at, ref=ref)
+             scheduled_at=scheduled_at, ref=ref, expected_ref=ref or "")
     except Exception as exc:  # noqa: BLE001
         log.exception("Could not record cancelled %s post in the posting log", platform)
         return f"Post was cancelled but the posting log was not updated: {exc}"

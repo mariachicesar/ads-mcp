@@ -341,6 +341,25 @@ def test_page_reel_failure_marks_ledger_failed(reel_env, fake_s3, social_profile
     assert json.loads(fake_s3.objects["ledger/el-cuis.json"])["songs"]["a"]["platforms"]["facebook"]["state"] == "failed"
 
 
+def test_page_reel_ledger_write_failure_returns_warning(reel_env, fake_s3, social_profile_dir, fixed_now, tmp_path):
+    payload = _sched(tmp_path, description=GOOD)
+    dry = publish.schedule_page_reel(_req(payload), None)
+    real_put = fake_s3.put_object
+
+    def put_object(**kw):
+        if kw["Key"].startswith("ledger/"):
+            raise RuntimeError("s3 down")
+        return real_put(**kw)
+
+    fake_s3.put_object = put_object
+    done = publish.schedule_page_reel(_req(payload, dry["approvalId"]), None)
+
+    result = done["data"]["result"]
+    assert result["videoId"] == "vid1"
+    assert "posting log was not updated" in result["ledgerWarning"]
+    assert "ledger/el-cuis.json" not in fake_s3.objects
+
+
 def test_page_tools_without_profile_write_no_ledger(reel_env, fake_s3, fixed_now, tmp_path):
     payload = _sched(tmp_path)
     dry = publish.schedule_page_video(_req(payload), None)
