@@ -93,6 +93,7 @@ For each post, in slot order, per platform:
 
 ### 11. Handle results
 - A platform error: keep the other platforms, report the error. The log marks that platform `failed`, and the next run offers it again.
+- Unknown outcome (runner `lastError` "stale processing…" or an unexpected exception): the post may already be live, so the log stays `queued` and the next run does NOT re-offer it. Tell the user to check that platform by hand; only re-schedule if the post is not there.
 - A result carrying `ledgerWarning`: the post went out but the log write failed. Tell the user, and warn that the next run may re-offer that platform: do not approve it twice.
 
 ### 12. Finish

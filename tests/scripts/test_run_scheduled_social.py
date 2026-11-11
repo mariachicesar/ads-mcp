@@ -357,3 +357,28 @@ def test_ledger_error_never_affects_publishing(fake_s3, social_profile_dir, monk
     states = _states(fake_s3)
     assert counts["failed"] == 1 and counts["published"] == 1
     assert states["failed"][0]["lastError"] == "bad video" and len(states["done"]) == 1
+
+
+# Unknown outcome: the post may already be live, so the log keeps "queued" and the
+# next scan never re-offers it (no double post). The queue still shows the failure.
+
+def test_stale_processing_keeps_ledger_queued(fake_s3, social_profile_dir):
+    key = _enqueue(NOW - timedelta(minutes=90))
+    entry_id = _entry_id(key)
+    _log_queued(entry_id)
+    media_queue.move(key, "processing", updates={"claimedAt": (NOW - timedelta(minutes=61)).strftime("%Y-%m-%dT%H:%M:%SZ")})
+
+    runner.run_once(now=NOW, publishers={})
+
+    assert len(_states(fake_s3)["failed"]) == 1
+    assert (_logged()["state"], _logged()["ref"]) == ("queued", entry_id)
+
+
+def test_unknown_exception_keeps_ledger_queued(fake_s3, social_profile_dir):
+    entry_id = _entry_id(_enqueue(NOW - timedelta(minutes=5)))
+    _log_queued(entry_id)
+
+    runner.run_once(now=NOW, publishers={"instagram": Publisher(RuntimeError("connection reset"))})
+
+    assert len(_states(fake_s3)["failed"]) == 1
+    assert _logged()["state"] == "queued"

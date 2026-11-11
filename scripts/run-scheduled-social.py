@@ -97,11 +97,15 @@ def _log_failed(entry: dict[str, Any]) -> None:
         log.exception("could not record failed %s %s in the posting log", entry.get("platform"), entry.get("id"))
 
 
-def _fail(key: str, entry: dict[str, Any], reason: str, counts: dict[str, int], **updates: Any) -> None:
+def _fail(key: str, entry: dict[str, Any], reason: str, counts: dict[str, int], *, definite: bool = True,
+          **updates: Any) -> None:
+    """Move the entry to failed. definite=False means the post may already be live (stale claim,
+    unknown exception): the posting log then stays "queued" so the next scan never re-offers it."""
     media_queue.move(key, "failed", updates={"lastError": reason, **updates})
     counts["failed"] += 1
     log.error("failed %s %s (%s): %s", entry.get("platform"), entry.get("id"), entry.get("businessKey"), reason)
-    _log_failed(entry)
+    if definite:
+        _log_failed(entry)
 
 
 def _reason(exc: AdsMcpError) -> str:
@@ -113,7 +117,7 @@ def _handle_processing(entry: dict[str, Any], now: datetime, counts: dict[str, i
     claimed = entry.get("claimedAt")
     if claimed and now - _parse(claimed) > STALE_PROCESSING_AFTER:
         platform = {"instagram": "Instagram", "tiktok": "the TikTok inbox"}.get(entry.get("platform"), "the platform")
-        _fail(entry["_key"], entry, f"stale processing; check {platform} before retrying", counts)
+        _fail(entry["_key"], entry, f"stale processing; check {platform} before retrying", counts, definite=False)
 
 
 def _handle_pending(entry: dict[str, Any], now: datetime, publishers: dict[str, Publisher], counts: dict[str, int]) -> None:
@@ -146,7 +150,7 @@ def _handle_pending(entry: dict[str, Any], now: datetime, publishers: dict[str, 
             _fail(key, entry, reason, counts, attempts=attempts, errorDetails=exc.details)
         return
     except Exception as exc:  # noqa: BLE001 - unknown state; never retry automatically
-        _fail(key, entry, f"{type(exc).__name__}: {exc}", counts, attempts=attempts)
+        _fail(key, entry, f"{type(exc).__name__}: {exc}", counts, definite=False, attempts=attempts)
         return
 
     media_queue.move(key, "done", updates={"attempts": attempts, "result": result, "publishedAt": _iso(now)})
@@ -166,7 +170,7 @@ def _guarded(entry: dict[str, Any], counts: dict[str, int], handler: Callable[[]
     except Exception as exc:  # noqa: BLE001
         log.exception("error handling %s", entry.get("_key"))
         try:
-            _fail(entry["_key"], entry, f"runner error: {type(exc).__name__}: {exc}", counts)
+            _fail(entry["_key"], entry, f"runner error: {type(exc).__name__}: {exc}", counts, definite=False)
         except Exception:  # noqa: BLE001 - already moved, or S3 down; next run retries the cleanup
             log.exception("could not mark %s failed", entry.get("_key"))
 
