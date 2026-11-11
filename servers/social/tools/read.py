@@ -28,12 +28,18 @@ def _utc(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
 
 
+def _live_queue(business_key: str) -> list[dict[str, Any]]:
+    """Queue entries that will still post: pending or processing."""
+    return media_queue.list_entries(states=("pending", "processing"), business_key=business_key)
+
+
 def find_new_videos(request: ToolRequest, request_id: str | None) -> dict:
     tool = "social_find_new_videos"
     profile = _profile(request.businessKey, tool)
     ledger = social_ledger.load(request.businessKey)
+    queued = [e for e in _live_queue(request.businessKey) if not e.get("_invalid")]
     try:
-        result = social_scan.find_new_videos(profile, ledger, folder=request.payload.get("folder"))
+        result = social_scan.find_new_videos(profile, ledger, folder=request.payload.get("folder"), queue_entries=queued)
     except OSError as exc:
         raise scheduling.invalid(f"Cannot read the folder: {exc}", tool) from exc
     return build_success_response(
@@ -54,7 +60,7 @@ def next_open_slots(request: ToolRequest, request_id: str | None) -> dict:
     ]
     taken += [
         scheduling.queue_time(e)
-        for e in media_queue.list_entries(states=("pending", "processing"), business_key=request.businessKey)
+        for e in _live_queue(request.businessKey)
         if not e.get("_invalid")
     ]
     try:

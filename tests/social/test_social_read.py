@@ -64,6 +64,26 @@ def test_find_new_videos_returns_scan(read, tmp_path, monkeypatch):
     assert resp["data"]["baselineCount"] == 0
 
 
+def test_find_new_videos_treats_queued_entries_as_queued(read, tmp_path, monkeypatch):
+    from shared import scheduling, social_scan
+    monkeypatch.setattr(social_scan, "_created_at", lambda p: NOW.timestamp())
+    folder = tmp_path / "ready"
+    folder.mkdir()
+    (folder / "Reloj Reel.mp4").write_bytes(b"x")
+    sha = scheduling.sha256_file(str(folder / "Reloj Reel.mp4"))
+    # The ledger write failed (ledgerWarning), but the queue still holds the posts.
+    media_queue.enqueue({"businessKey": "el-cuis", "platform": "instagram", "videoSha256": sha,
+                         "scheduledAt": "2026-11-17T03:00:00Z"})
+    media_queue.move(media_queue.enqueue({"businessKey": "el-cuis", "platform": "tiktok", "videoSha256": sha,
+                                          "scheduledAt": "2026-11-17T03:00:00Z"}), "processing")
+    media_queue.enqueue({"businessKey": "other", "platform": "facebook", "videoSha256": sha,
+                         "scheduledAt": "2026-11-17T03:00:00Z"})
+    media_queue.move(media_queue.enqueue({"businessKey": "el-cuis", "platform": "facebook", "videoSha256": sha,
+                                          "scheduledAt": "2026-11-17T03:00:00Z"}), "failed")
+    [cand] = read.find_new_videos(_req({"folder": str(folder)}), None)["data"]["candidates"]
+    assert cand["missingPlatforms"] == ["facebook"] and cand["possibleRepeat"] is False
+
+
 def test_get_posting_log(read):
     social_ledger.mark("el-cuis", song_key="a", sha256="s", platform="facebook", state="queued",
                        scheduled_at="2026-11-19T03:00:00Z", ref="r")
