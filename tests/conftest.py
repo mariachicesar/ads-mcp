@@ -48,3 +48,30 @@ def _clear_settings_cache():
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _empty_social_profiles_dir(monkeypatch, tmp_path) -> Path:
+    d = tmp_path / "empty_social_profiles"
+    d.mkdir()
+    monkeypatch.setenv("ADS_MCP_SOCIAL_PROFILES_DIR", str(d))
+    return d
+
+
+@pytest.fixture
+def social_profile_dir(monkeypatch, tmp_path) -> Path:
+    import shutil
+
+    d = tmp_path / "social_profiles"
+    d.mkdir()
+    src = Path(__file__).resolve().parent.parent / "social" / "profiles" / "el-cuis.json"
+    shutil.copy(src, d / "el-cuis.json")
+    monkeypatch.setenv("ADS_MCP_SOCIAL_PROFILES_DIR", str(d))
+    return d
+
+
+@pytest.fixture
+def profile(social_profile_dir) -> dict:
+    from shared.social_profile import load_profile
+
+    return load_profile("el-cuis")
