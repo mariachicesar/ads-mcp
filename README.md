@@ -438,6 +438,53 @@ The `tiktok` MCP server queues videos in the same S3 queue (`platform: "tiktok"`
 - The runner streams the video from S3 in memory (one chunk ≤ 64 MiB, otherwise 10 MiB chunks), never to disk. Upload errors retry up to 3 times; once all chunks are uploaded nothing is retried automatically (check the TikTok inbox before rescheduling).
 - The refresh token lasts about a year; if it expires or is revoked, entries fail with a hint to rerun `scripts/tiktok-auth.py`.
 
+## Social posting workflow
+
+Schedules the same video to Facebook, Instagram and TikTok in one slot, with a batch approval. Currently configured for El Cuis (`el-cuis`).
+
+**Profile file: `social/profiles/<business>.json`**
+
+| Key | Meaning |
+|-----|---------|
+| `businessKey`, `websiteDomain` | Business and the domain captions must link to (`https://` only) |
+| `serviceCities` | Cities a caption may mention (at least one required) |
+| `readyFolder` | Local folder scanned for new `.mp4`/`.mov` videos |
+| `baselineCutoff` | Files modified before this are baseline (already posted) and never scheduled |
+| `hookMaxChars` | Max length of the caption's first line (default 150) |
+| `alwaysHashtags` | Hashtags every caption should carry |
+| `slots` | `weekdayWindow`, `weekdayDefault`, `weekend` window (Pacific), `horizonDays` to plan ahead, `minLeadMinutes` before a slot can be used |
+| `platforms` | Platforms each video goes to |
+
+Override the directory with `ADS_MCP_SOCIAL_PROFILES_DIR` (tests do).
+
+**Caption rules.** When a profile exists for the request's `businessKey`, the Facebook, Instagram and TikTok schedule tools add blocking rule checks: `caption-hook` (first line is text, within `hookMaxChars`), `caption-https-link` (an `https://` link to `websiteDomain`, no `http://`), `caption-hashtags` (at least one), `caption-city` (mentions a service city). Businesses without a profile are unaffected.
+
+**Posting log.** On execute, the schedule tools record each post in S3 at `ledger/<business>.json`, keyed by song, with per-platform state (`queued`, `failed`, `cancelled`), scheduled time and file SHA-256. Cancelling marks the entry cancelled. Log write failures never fail the schedule call.
+
+**`social` MCP server** (`servers/social/`, read-only):
+
+| Tool | What it does |
+|------|--------------|
+| `social_find_new_videos` | New videos in the Ready folder, excluding baseline files and songs already in the log |
+| `social_next_open_slots` | Open posting slots from the profile, skipping those already taken |
+| `social_get_posting_log` | The S3 posting log |
+
+`meta_ads_get_organic_insights(business_key, days=30)` (meta-ads, read-only) returns Instagram and Facebook post performance, Instagram audience by Pacific hour, a `recommendedWeekdayTime` (`HH:00`) with `recommendationReason`, and `warnings`.
+
+**Register the servers for Claude Code** (from the repo root; `-s local` keeps them out of git):
+
+```bash
+claude mcp add analytics -s local -- .venv/Scripts/python.exe servers/analytics/mcp_server.py
+claude mcp add search-console -s local -- .venv/Scripts/python.exe servers/search-console/mcp_server.py
+claude mcp add social -s local -- .venv/Scripts/python.exe servers/social/local_stdio.py
+```
+
+`google-ads`, `meta-ads` and `tiktok` are registered as described above; `social` needs `ADS_MCP_MEDIA_BUCKET` (and AWS credentials) in `.env` to read the log.
+
+**Run it.** In Claude Code say **"schedule new videos"** (the `/schedule-social` skill). It finds new videos, pulls organic insights, writes bilingual captions, assigns slots, shows one batch dry-run preview, and queues everything only after you approve.
+
+**Limits.** Instagram Reels are capped at **300 MB** (the dry run is blocked above it). TikTok drafts carry **no caption**: paste it from `tiktok_list_scheduled` when you tap Post.
+
 ## Docs
 
 - `CLAUDE.md` — source of truth for all agents and MCP servers
