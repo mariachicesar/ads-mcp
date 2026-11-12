@@ -449,23 +449,34 @@ The `tiktok` MCP server queues videos in the same S3 queue (`platform: "tiktok"`
 - These tools call TikTok directly and refresh the token on each call; a rotated refresh token is saved to Secrets Manager before use (your local AWS credentials need `secretsmanager:PutSecretValue` on the TikTok secret).
 - TikTok only returns lifetime counts per video: no per-day views or traffic sources.
 
-### YouTube (read-only, `servers/youtube/`)
+### YouTube (`servers/youtube/`)
 
 | Tool | What it does |
 |------|--------------|
 | `youtube_get_channel_overview` | Subscribers, lifetime views, video count |
 | `youtube_get_recent_videos` | Latest uploads (`limit` 1-50) with views, likes, comments, engagement rate |
+| `youtube_schedule_video` | Uploads private now and schedules it to go public at the slot (dry run, then approvalId; `title`, `description`) |
+| `youtube_list_scheduled` | Queued uploads with live YouTube status and publish time |
+| `youtube_cancel_scheduled` | Deletes a still-private scheduled video (dry run, then approvalId) |
 | `youtube_get_analytics` | Views, watch minutes, avg view duration, likes, comments, shares, subscribers gained for `LAST_7_DAYS`/`LAST_28_DAYS`/`LAST_30_DAYS`/`LAST_90_DAYS`, by `day`, `traffic_source`, `video`, `country` or `device` (data lags ~2 days) |
 
 **One-time setup**
 
-1. In the Google Cloud project used for the other Google servers, enable **YouTube Data API v3** and **YouTube Analytics API**, and add the scopes `youtube.readonly` and `yt-analytics.readonly` to the OAuth consent screen.
-2. `pip install google-auth-oauthlib`, then `python scripts/youtube-auth.py --business-key el-cuis` (same `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`). Sign in with the Google account that owns the channel. This saves `/ads-mcp/el-cuis/youtube/config` (add `--channel-id UC...` if the account manages several channels).
-3. Register it: `claude mcp add youtube -s local -- .venv/Scripts/python.exe servers/youtube/mcp_server.py`, or add a `youtube` entry to `claude_desktop_config.json` like `search-console`, then restart.
+1. In the Google Cloud project used for the other Google servers, enable **YouTube Data API v3** and **YouTube Analytics API**, and add the scopes `youtube.readonly`, `yt-analytics.readonly` and `youtube.upload` to the OAuth consent screen.
+2. `pip install google-auth-oauthlib`, then `python scripts/youtube-auth.py --business-key el-cuis` (set `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` to the El Cuis Google project; the script requests all 3 scopes and explains any that were not granted). Sign in with the Google account that owns the channel. This saves `/ads-mcp/el-cuis/youtube/config` (add `--channel-id UC...` if the account manages several channels).
+3. Register it: `claude mcp add youtube -s local -- .venv/Scripts/python.exe servers/youtube/local_stdio.py` (needs `ADS_MCP_MEDIA_BUCKET` in `.env` because the schedule tools write the S3 queue), or add a `youtube` entry to `claude_desktop_config.json` like `search-console`, then restart.
+
+### GBP social posts (`servers/gbp/`)
+
+`gbp_schedule_social_post(business_key, file_path, scheduled_time, summary, frame_seconds=None)` queues a Business Profile post (a photo frame from the video plus a Call button) in the same S3 queue; the EC2 runner publishes it at the slot, adding a YouTube link line if the video is public, otherwise a website line. The dry run saves the frame locally and returns `framePath`/`frameSeconds`; it needs ffmpeg/ffprobe (a blocking `gbp-frame` rule appears when missing). `gbp_list_social_posts` and `gbp_cancel_social_post` manage the queue.
+
+1. Run `python scripts/gbp-auth.py --business-key el-cuis`. It uses the Google project already approved for the Business Profile API and warns if the listing phone is not 626-922-0091.
+2. The `gbp` server entry needs `ADS_MCP_MEDIA_BUCKET` in its `env` (plus AWS credentials) so the schedule tools can write the queue.
+3. The EC2 runner needs the youtube requirements installed (`scripts/deploy.sh` already lists youtube).
 
 ## Social posting workflow
 
-Schedules the same video to Facebook, Instagram and TikTok in one slot, with a batch approval. Currently configured for El Cuis (`el-cuis`).
+Schedules the same video to Facebook, Instagram, TikTok, YouTube and GBP in one slot, with a batch approval. Currently configured for El Cuis (`el-cuis`).
 
 **Profile file: `social/profiles/<business>.json`**
 
@@ -482,7 +493,7 @@ Schedules the same video to Facebook, Instagram and TikTok in one slot, with a b
 
 Override the directory with `ADS_MCP_SOCIAL_PROFILES_DIR` (tests do).
 
-**Caption rules.** When a profile exists for the request's `businessKey`, the Facebook, Instagram and TikTok schedule tools add blocking rule checks: `caption-hook` (first line is text, within `hookMaxChars`), `caption-https-link` (an `https://` link to `websiteDomain`, no `http://`), `caption-hashtags` (at least one), `caption-city` (mentions a service city). Businesses without a profile are unaffected.
+**Caption rules.** When a profile exists for the request's `businessKey`, the Facebook, Instagram, TikTok and YouTube schedule tools add blocking rule checks: `phone` (the profile phone 626-922-0091 must appear), `caption-hook` (first line is text, within `hookMaxChars`), `caption-https-link` (an `https://` link to `websiteDomain`, no `http://`), `caption-hashtags` (at least one), `caption-city` (mentions a service city). Businesses without a profile are unaffected.
 
 **Posting log.** On execute, the schedule tools record each post in S3 at `ledger/<business>.json`, keyed by song, with per-platform state (`queued`, `failed`, `cancelled`), scheduled time and file SHA-256. Cancelling marks the entry cancelled, and the runner marks an Instagram/TikTok entry that permanently fails as `failed` so the next run offers it again. Log write failures never fail the schedule call.
 
@@ -505,9 +516,21 @@ claude mcp add tiktok -s local -- .venv/Scripts/python.exe servers/tiktok/local_
 claude mcp add analytics -s local -- .venv/Scripts/python.exe servers/analytics/mcp_server.py
 claude mcp add search-console -s local -- .venv/Scripts/python.exe servers/search-console/mcp_server.py
 claude mcp add social -s local -- .venv/Scripts/python.exe servers/social/local_stdio.py
+claude mcp add youtube -s local -- .venv/Scripts/python.exe servers/youtube/local_stdio.py
 ```
 
-`meta-ads`, `tiktok` and `social` need `ADS_MCP_MEDIA_BUCKET` (and AWS credentials) in `.env` for the queue and the log.
+`meta-ads`, `tiktok`, `youtube`, `gbp` and `social` need `ADS_MCP_MEDIA_BUCKET` (and AWS credentials) in `.env` for the queue and the log.
+
+**Switch a platform on.** After the auth scripts above and a runner deploy, snapshot the existing videos so they are never back-filled, per platform:
+
+```bash
+python scripts/social-enable-platform.py --business-key el-cuis --platform youtube --dry-run
+python scripts/social-enable-platform.py --business-key el-cuis --platform youtube
+python scripts/social-enable-platform.py --business-key el-cuis --platform gbp --dry-run
+python scripts/social-enable-platform.py --business-key el-cuis --platform gbp
+```
+
+Review the dry-run snapshot first, then run without `--dry-run` and commit the updated profile.
 
 **Run it.** In Claude Code say **"schedule new videos"** (the `/schedule-social` skill). It finds new videos, pulls organic insights, writes bilingual captions, assigns slots, shows one batch dry-run preview, and queues everything only after you approve.
 

@@ -1,11 +1,11 @@
 ---
 name: schedule-social
-description: Use when the user says "schedule new videos", "schedule social posts", or asks to queue El Cuis (Mariachi El Cuis, business_key el-cuis) videos to Facebook, Instagram and TikTok. Finds new videos in the Ready folder, writes data-driven bilingual captions, assigns posting slots, and queues posts after one batch approval.
+description: Use when the user says "schedule new videos", "schedule social posts", or asks to queue El Cuis (Mariachi El Cuis, business_key el-cuis) videos to Facebook, Instagram, TikTok, YouTube and Google Business Profile (GBP). Finds new videos in the Ready folder, writes data-driven bilingual captions, assigns posting slots, and queues posts after one batch approval.
 ---
 
 # Schedule social posts (El Cuis)
 
-Business key: `el-cuis`. Same video goes to Facebook, Instagram and TikTok in the same slot. Organic posting only.
+Business key: `el-cuis`. Same video goes to Facebook, Instagram, TikTok, YouTube and GBP in the same slot. Organic posting only.
 
 ## Hard rules
 
@@ -25,7 +25,7 @@ Read `servers/content-agent/brands/el-cuis.md` and `social/profiles/el-cuis.json
 Call `social_find_new_videos(business_key="el-cuis")` (server `social`).
 - No `candidates`: tell the user there is nothing new and STOP. Do not pull any data.
 - List `skipped` items and why.
-- `instagramTooLarge` candidate: ask for a re-export under 300 MB. Until the user answers, Instagram is excluded for that file (Facebook + TikTok only).
+- `instagramTooLarge` candidate: ask for a re-export under 300 MB. Until the user answers, Instagram is excluded for that file (the other platforms only).
 - `possibleRepeat` candidate: ask the user to include or skip. Until the user answers, it is excluded (skipped).
 - Collect the answers to these questions before step 8; dry-run only what the user included.
 - A candidate's `missingPlatforms` lists the platforms still to schedule (a failed platform from an earlier run is re-offered). Only dry-run those.
@@ -62,31 +62,41 @@ Spanish first, then English. Use this format exactly:
 <1-2 lines English>
 
 📍 <City> · <City>
+📞 626-922-0091
 🔗 https://mariachielcuis.com/<page>
 
 #hashtag #hashtag ...
 ```
 
 - Line 1 is the hook: short, scroll-stopping, under `hookMaxChars` (150).
-- Must contain: a hook, an `https://` mariachielcuis.com link (never `http://`), hashtags, and at least one confirmed city. The posting tools enforce this.
+- Must contain: a hook, an `https://` mariachielcuis.com link (never `http://`), hashtags, and at least one confirmed city, and the phone `626-922-0091` (the profile phone; a blocking rule check on every platform). The posting tools enforce this.
 - Voice: warm, celebratory, professional. Follow the brand guardrails above. Treat copy as a draft for the user.
-- Same caption text on all three platforms.
+- Same caption text on Facebook, Instagram, TikTok and the YouTube description. GBP and the YouTube title are written separately in step 7b.
+
+### 7b. YouTube title and GBP summary
+Per video, also write:
+- YouTube title: `<Song name> | <Spanish hook>`, at most 100 characters, no `<` or `>`.
+- GBP summary: Spanish hook as the first line, 1-2 Spanish lines about booking mariachi for the event/city, then one short English line. No phone number (the Call button dials it) and no link (the runner appends the link line). Max 1,380 characters.
 
 ### 8. Dry-run every post on every missing platform
 No `approval_id`. Use the file path from the candidate and the slot `pacific` time as `scheduled_time`.
 - Facebook: `meta_ads_schedule_page_reel(business_key, file_path, scheduled_time, description=<caption>)`
 - Instagram: `meta_ads_schedule_instagram_reel(business_key, file_path, scheduled_time, caption)`
 - TikTok: `tiktok_schedule_inbox_video(business_key, file_path, scheduled_time, caption)`
+- YouTube: `youtube_schedule_video(business_key, file_path, scheduled_time, title, description=<caption>)` (server `youtube`)
+- GBP: `gbp_schedule_social_post(business_key, file_path, scheduled_time, summary)` (server `gbp`)
+
+For GBP, Read the image at the dry run's `framePath` and show it to the user (it is the post photo, taken at `frameSeconds`). If it looks bad, offer another second and re-dry-run with `frame_seconds`. If the dry run carries a blocking `gbp-frame` rule (ffmpeg missing), tell the user to install ffmpeg or pass `frame_seconds`; do not schedule GBP for that video until it passes.
 
 Record each `approvalId` and the rule checks. If any dry run is blocked or a rule check fails, fix the caption and re-run the dry run, or show the problem and ask.
 
 ### 9. Batch preview
-Show one table per video: slot (Pacific), file, platforms, rule checks (hook, https link, hashtags, city) per platform, then the full caption underneath. Add notes: skipped files, repeats, size problems, data tools that were unavailable, and that TikTok drafts arrive in the inbox up to 30 minutes after the slot. Ask "Approve this batch?" and WAIT for one explicit batch approval. Approvals expire after 15 minutes, so do not execute from the old approvalIds.
+Show one table per video: slot (Pacific), file, platforms, rule checks (hook, https link, hashtags, city, phone) per platform, then the full caption underneath. Also show: the YouTube title and whether it is a Short or a regular video (`short` in the preview: true, false, or null = unknown), the GBP frame image with its summary, and the phone rule result per platform. Add notes: skipped files, repeats, size problems, data tools that were unavailable, and that TikTok drafts arrive in the inbox up to 30 minutes after the slot, YouTube is uploaded private now and goes public by itself at the slot, and GBP posts within 30 minutes of the slot. Ask "Approve this batch?" and WAIT for one explicit batch approval. Approvals expire after 15 minutes, so do not execute from the old approvalIds.
 
 If the user changes a caption, time or file after seeing the preview, re-dry-run the changed posts on every platform and show them again for approval. Dropping a post needs no re-approval.
 
 ### 10. Execute, post by post
-For each post, in slot order, per platform:
+For each post, in slot order, per platform, in this order: Facebook, Instagram, TikTok, YouTube, GBP:
 1. Fresh dry run with arguments identical to those shown in the preview.
 2. If the arguments or rule checks differ from what the user saw, or anything is blocked: STOP and ask before continuing.
 3. Otherwise execute immediately: same call, same exact arguments, plus `approval_id` from that fresh dry run.
@@ -94,6 +104,8 @@ For each post, in slot order, per platform:
 ### 11. Handle results
 - A platform error: keep the other platforms, report the error. The log marks that platform `failed`, and the next run offers it again.
 - Unknown outcome (runner `lastError` "stale processing…" or an unexpected exception): the post may already be live, so the log stays `queued` and the next run does NOT re-offer it. Tell the user to check that platform by hand; only re-schedule if the post is not there.
+- YouTube execute returning `outcomeUnknown` + `warning`: the upload may exist. Tell the user to check YouTube Studio; the song is not re-offered, so only re-schedule if the video is not there. A `verifyWarning` means the video is scheduled but the go-public check was not queued: tell the user to confirm in YouTube Studio after the slot that it went public.
+- Runner unknown outcomes: YouTube "not public after its slot; check YouTube Studio", GBP "check the El Cuis Business Profile posts". The log stays `queued` and the platform is not re-offered; the user checks by hand and only re-schedules if it is missing.
 - A result carrying `ledgerWarning`: the post went out but the log write failed. Tell the user, and warn that the next run may re-offer that platform: do not approve it twice.
 
 ### 12. Finish
@@ -101,5 +113,5 @@ Report:
 - What was queued per platform (video, slot, platform).
 - Failures and warnings.
 - Every TikTok caption in full, for pasting (TikTok drafts carry no caption).
-- Reminder: TikTok drafts arrive in the TikTok inbox up to 30 minutes after the slot; the user taps Post. Instagram publishes up to 30 minutes after the slot.
+- Reminder: TikTok drafts arrive in the TikTok inbox up to 30 minutes after the slot; the user taps Post. Instagram publishes up to 30 minutes after the slot. YouTube goes public by itself at the slot (the runner confirms it about 1-2 hours later). GBP posts within 30 minutes of the slot, with the YouTube link if the video is already live, otherwise the website link.
 - Videos left for the next run.
