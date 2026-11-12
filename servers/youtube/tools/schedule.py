@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 from shared import media_queue, scheduling, social_ledger, video_probe, youtube_client
@@ -29,6 +30,7 @@ SHORTS_MAX_SECONDS = 180
 CATEGORY_MUSIC = "10"
 VERIFY_DELAY = timedelta(minutes=60)
 REJECTED_UPLOAD = {"rejected", "failed"}
+UPLOAD_RETRIES = 3
 _TS = "%Y-%m-%dT%H:%M:%SZ"
 
 
@@ -90,13 +92,37 @@ def _format_check(info: dict[str, Any] | None, short: bool | None) -> dict[str, 
     return build_rule_check(rule="youtube-format", passed=True, severity="info", message=message)
 
 
+class UploadOutcomeUnknown(Exception):
+    """The upload request went out and failed in a way that may still have created the video."""
+
+
+def _is_definite(exc: Exception) -> bool:
+    """A 4xx HttpError means YouTube refused the request, so no video was created."""
+    status = getattr(getattr(exc, "resp", None), "status", None) if isinstance(exc, HttpError) else None
+    try:
+        return status is not None and 400 <= int(status) < 500
+    except (TypeError, ValueError):
+        return False
+
+
 def _upload(yt, file_path: str, body: dict[str, Any]) -> str:
+    """Resumable upload; returns the videoId.
+
+    Errors before the first request (building the media/request) and 4xx refusals propagate as-is
+    (definite: nothing was created). Anything else once the upload started raises
+    UploadOutcomeUnknown, because YouTube may have finalized the video before the error.
+    """
     media = MediaFileUpload(file_path, chunksize=-1, resumable=True)
     insert = yt.videos().insert(part="snippet,status", body=body, media_body=media)
     response = None
-    while response is None:
-        _, response = insert.next_chunk()
-    return response["id"]
+    try:
+        while response is None:
+            _, response = insert.next_chunk(num_retries=UPLOAD_RETRIES)
+        return response["id"]
+    except Exception as exc:  # noqa: BLE001
+        if _is_definite(exc):
+            raise
+        raise UploadOutcomeUnknown(str(exc)[:300] or type(exc).__name__) from exc
 
 
 def schedule_video(request: ToolRequest, request_id: str | None) -> dict:
@@ -134,6 +160,14 @@ def schedule_video(request: ToolRequest, request_id: str | None) -> dict:
                 video_id = _upload(yt, file_path, body)
             except AdsMcpError:
                 raise
+            except UploadOutcomeUnknown as exc:
+                # Must not reach run_and_mark's failure path: a "failed" log re-offers the song and
+                # could upload it twice. Logged as queued with no ref instead; no verify entry.
+                return {"videoId": None, "url": None, "verifyQueueKey": None, "short": short,
+                        "outcomeUnknown": True,
+                        "warning": (f"YouTube upload outcome unknown ({exc}); check YouTube Studio for a "
+                                    f"private video scheduled at {scheduling.describe_time(when)} before "
+                                    "re-scheduling. This song will not be re-offered automatically.")}
             except Exception as exc:  # noqa: BLE001
                 raise youtube_client.upstream_error(tool, exc) from exc
             try:
@@ -168,7 +202,7 @@ def schedule_video(request: ToolRequest, request_id: str | None) -> dict:
 
     described = scheduling.describe_time(when)
     kind = {True: "as a Short", False: "as a regular video", None: "(format unknown)"}[short]
-    return scheduling.write_flow(
+    response = scheduling.write_flow(
         request, request_id, service=SERVICE_NAME, tool=tool, rule_checks=rule_checks, changes=changes,
         preview={"file": file, "scheduledFor": described, "short": short, "upload": body},
         dry_summary=(f"Would upload '{title}' to YouTube now as a private video {kind} that YouTube makes "
@@ -176,14 +210,22 @@ def schedule_video(request: ToolRequest, request_id: str | None) -> dict:
         done_summary=f"Uploaded '{title}' to YouTube; it goes public at {described}.",
         execute=execute, bound=scheduling.bound_args(request, sha),
     )
+    result = (response.get("data") or {}).get("result") or {}
+    if result.get("outcomeUnknown"):
+        response["summary"] = result["warning"]
+        response.setdefault("warnings", []).append(result["warning"])
+    elif result.get("verifyWarning"):
+        response.setdefault("warnings", []).append(result["verifyWarning"])
+    return response
 
 
 def _queued_records(business_key: str) -> list[dict[str, Any]]:
     rows = []
     for key, song in social_ledger.load(business_key)["songs"].items():
         record = (song.get("platforms") or {}).get(PLATFORM) or {}
-        if record.get("state") == "queued" and record.get("ref"):
-            rows.append({"songKey": key, "videoId": record["ref"], "scheduledAt": record.get("scheduledAt"),
+        if record.get("state") == "queued":
+            # ref None = upload outcome unknown (logged queued so the song is not re-offered).
+            rows.append({"songKey": key, "videoId": record.get("ref"), "scheduledAt": record.get("scheduledAt"),
                          "sha256": record.get("sha256")})
     return sorted(rows, key=lambda r: r.get("scheduledAt") or "")
 
@@ -201,27 +243,32 @@ def list_scheduled(request: ToolRequest, request_id: str | None) -> dict:
     tool = "youtube_list_scheduled"
     records = _queued_records(request.businessKey)
     videos: dict[str, dict[str, Any]] = {}
-    if records:
+    ids = [r["videoId"] for r in records if r["videoId"]]
+    if ids:
         try:
-            videos = _fetch_videos(_youtube(request.businessKey, tool), [r["videoId"] for r in records])
+            videos = _fetch_videos(_youtube(request.businessKey, tool), ids)
         except AdsMcpError:
             raise
         except Exception as exc:  # noqa: BLE001
             raise youtube_client.upstream_error(tool, exc) from exc
     rows = []
     for record in records:
-        video = videos.get(record["videoId"])
+        vid = record["videoId"]
+        video = videos.get(vid) if vid else None
         status, snippet = (video or {}).get("status") or {}, (video or {}).get("snippet") or {}
         publish = _parse_ts(status.get("publishAt") or record.get("scheduledAt"))
         rows.append({
-            "songKey": record["songKey"], "videoId": record["videoId"], "url": f"https://youtu.be/{record['videoId']}",
-            "found": video is not None, "title": snippet.get("title"),
+            "songKey": record["songKey"], "videoId": vid, "url": f"https://youtu.be/{vid}" if vid else None,
+            "found": video is not None, "outcomeUnknown": not vid, "title": snippet.get("title"),
             "privacyStatus": status.get("privacyStatus"), "uploadStatus": status.get("uploadStatus"),
             "publishAt": status.get("publishAt") or record.get("scheduledAt"),
             "publishPacific": publish.astimezone(scheduling.SCHEDULE_TZ).isoformat() if publish else None,
         })
-    missing = sum(1 for r in rows if not r["found"])
+    unknown = sum(1 for r in rows if r["outcomeUnknown"])
+    missing = sum(1 for r in rows if not r["found"]) - unknown
     summary = f"{len(rows)} YouTube video(s) in the posting log as queued."
+    if unknown:
+        summary += f" {unknown} with an unknown upload outcome (check YouTube Studio)."
     if missing:
         summary += f" {missing} not found on YouTube (deleted in YouTube Studio?)."
     return build_success_response(

@@ -28,11 +28,14 @@ class _Exec:
 
 
 class _Insert:
-    def __init__(self, video_id, chunks=2):
-        self.video_id, self.chunks = video_id, chunks
+    def __init__(self, yt, video_id, chunks=2):
+        self.yt, self.video_id, self.chunks = yt, video_id, chunks
 
-    def next_chunk(self):
+    def next_chunk(self, **kwargs):
+        self.yt.chunk_calls.append(kwargs)
         self.chunks -= 1
+        if self.chunks <= 0 and self.yt.chunk_error:
+            raise self.yt.chunk_error  # e.g. a timeout on the final chunk
         return (None, {"id": self.video_id}) if self.chunks <= 0 else ("progress", None)
 
 
@@ -43,6 +46,8 @@ class FakeYouTube:
         self.upload_status = "uploaded"
         self.next_id = "vid123"
         self.list_error: Exception | None = None
+        self.chunk_error: Exception | None = None
+        self.chunk_calls: list[dict] = []
 
     def videos(self):
         return self
@@ -54,7 +59,7 @@ class FakeYouTube:
             "id": self.next_id, "snippet": dict(body["snippet"]),
             "status": {**body["status"], "uploadStatus": self.upload_status},
         }
-        return _Insert(self.next_id)
+        return _Insert(self, self.next_id)
 
     def list(self, **kwargs):
         self.listed.append(kwargs)
@@ -351,3 +356,75 @@ def test_server_passes_tool_arguments(monkeypatch):
 
     req = seen["req"]
     assert req.dryRun and req.payload == {"filePath": "a.mp4", "scheduledTime": SLOT, "title": TITLE, "description": "d"}
+
+
+# --- unknown vs definite upload failures (fix round 1) ---------------------------------------
+
+def _http_error(status):
+    from googleapiclient.errors import HttpError
+
+    resp = type("Resp", (), {"status": status, "reason": "err"})()
+    return HttpError(resp, b'{"error": {"message": "bad"}}')
+
+
+def test_upload_passes_num_retries(ctx, execute, social_profile_dir):
+    execute()
+
+    assert ctx["yt"].chunk_calls and all(c == {"num_retries": 3} for c in ctx["yt"].chunk_calls)
+
+
+@pytest.mark.parametrize("error", [TimeoutError("timed out"), ConnectionResetError("reset"), "http500"])
+def test_unknown_outcome_logs_queued_without_ref_or_verify_entry(ctx, execute, social_profile_dir, error):
+    ctx["yt"].chunk_error = _http_error(500) if error == "http500" else error
+
+    r = execute()
+
+    result = r["data"]["result"]
+    assert result["outcomeUnknown"] is True and result["videoId"] is None and result["verifyQueueKey"] is None
+    assert "outcome unknown" in r["summary"] and "YouTube Studio" in r["summary"]
+    assert _logged(ctx["s3"])["state"] == "queued" and _logged(ctx["s3"])["ref"] is None
+    assert _queue("pending") == []
+
+
+def test_unknown_outcome_is_not_reoffered_by_scan(ctx, execute, social_profile_dir):
+    from shared import social_scan
+
+    ctx["yt"].chunk_error = TimeoutError("timed out")
+    execute()
+
+    profile = {"readyFolder": str(ctx["video"].parent), "baselineCutoff": "2000-01-01T00:00:00Z",
+               "platforms": ["youtube"]}
+    scan = social_scan.find_new_videos(profile, social_ledger.load("el-cuis"), queue_entries=_queue("pending"))
+    assert scan["candidates"] == []
+
+
+def test_unknown_outcome_listed(ctx, execute, social_profile_dir):
+    ctx["yt"].chunk_error = TimeoutError("timed out")
+    execute()
+    ctx["yt"].listed.clear()
+
+    r = ctx["mod"].list_scheduled(ToolRequest(businessKey="el-cuis", payload={}), None)
+
+    [row] = r["data"]["videos"]
+    assert row["outcomeUnknown"] is True and row["videoId"] is None and ctx["yt"].listed == []
+
+
+def test_http_4xx_on_upload_marks_failed(ctx, execute, social_profile_dir):
+    ctx["yt"].chunk_error = _http_error(400)
+
+    with pytest.raises(AdsMcpError) as err:
+        execute()
+
+    assert err.value.error_code == "UPSTREAM_ERROR" and _logged(ctx["s3"])["state"] == "failed"
+    assert _queue("pending") == []
+
+
+def test_http_4xx_on_insert_marks_failed(ctx, execute, social_profile_dir, monkeypatch):
+    def refused(**kwargs):
+        raise _http_error(400)
+    monkeypatch.setattr(ctx["yt"], "insert", refused)
+
+    with pytest.raises(AdsMcpError):
+        execute()
+
+    assert _logged(ctx["s3"])["state"] == "failed"
