@@ -378,6 +378,7 @@ def create_post(
     offer_coupon_code: str | None = None,
     offer_redeem_online_url: str | None = None,
     language_code: str | None = None,
+    media_url: str | None = None,
     tool: str | None = None,
 ) -> dict[str, Any]:
     """Create a new local post on the GBP listing.
@@ -397,6 +398,9 @@ def create_post(
         if call_to_action_type != "CALL" and call_to_action_url:
             cta["url"] = call_to_action_url
         body["callToAction"] = cta
+
+    if media_url:
+        body["media"] = [{"mediaFormat": "PHOTO", "sourceUrl": media_url}]
 
     if topic_type == "EVENT" and event_title:
         body["event"] = {

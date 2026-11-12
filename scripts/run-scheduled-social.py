@@ -78,6 +78,46 @@ def publish_tiktok_entry(entry: dict[str, Any]) -> dict[str, Any]:
     return {**sent, "note": note}
 
 
+WEBSITE_LINE = "Más videos y reservaciones: https://mariachielcuis.com/"
+
+
+def _gbp_link_line(entry: dict[str, Any]) -> str:
+    """Link the song's YouTube video once it is public; any problem falls back to the website."""
+    try:
+        from shared.youtube_client import youtube_status  # lazy: runner must start without the Google libs
+
+        business_key = entry["businessKey"]
+        record = social_ledger.load(business_key)["songs"][entry["songKey"]]["platforms"].get("youtube") or {}
+        video_id = record.get("ref")
+        if record.get("state") == "queued" and video_id:
+            status = youtube_status(business_key, video_id)
+            if status and status.get("privacyStatus") == "public":
+                return f"▶️ Mira el video completo en YouTube: https://youtu.be/{video_id}"
+    except Exception:  # noqa: BLE001 - never fail the post over the link
+        log.exception("could not look up the YouTube link for %s", entry.get("id"))
+    return WEBSITE_LINE
+
+
+def publish_gbp_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    """Publish a Google Business Profile post (STANDARD, Call button, one photo).
+
+    gbp_client raises AdsMcpError(retryable=False) for 4xx (definite failure) and retryable=True for
+    5xx; a timeout/connection error is not an AdsMcpError, so the runner treats it as unknown outcome.
+    """
+    from servers.gbp.gbp_client import create_post  # lazy: Google libs are not needed by other platforms
+    from shared.runtime_config import load_platform_runtime_config
+
+    config = load_platform_runtime_config(
+        platform="gbp", business_key=entry["businessKey"],
+        required_keys=("client_id", "client_secret", "refresh_token", "gbp_location_id"),
+        tool="run-scheduled-social")
+    link_line = _gbp_link_line(entry)
+    post = create_post(
+        config, summary=entry["summary"] + "\n\n" + link_line, topic_type="STANDARD",
+        call_to_action_type="CALL", media_url=media_queue.presigned_get(entry["imageKey"]), language_code="es")
+    return {"resourceName": post.get("resourceName"), "searchUrl": post.get("searchUrl"), "linkLine": link_line}
+
+
 class UnknownOutcome(Exception):
     """The post may or may not be live; fail the queue entry but leave the posting log "queued"."""
 
@@ -246,7 +286,8 @@ def main() -> int:
                         datefmt="%Y-%m-%dT%H:%M:%S")
     counts = run_once(now=datetime.now(timezone.utc), publishers={"instagram": publish_instagram_entry,
                                                                   "tiktok": publish_tiktok_entry,
-                                                                  "youtube": verify_youtube_entry})
+                                                                  "youtube": verify_youtube_entry,
+                                                                  "gbp": publish_gbp_entry})
     log.info("run complete: %s", counts)
     return 1 if counts["failed"] else 0
 

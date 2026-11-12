@@ -501,3 +501,123 @@ def test_youtube_without_publisher_keeps_ledger_queued(fake_s3, social_profile_d
 
     assert len(_states(fake_s3)["failed"]) == 1
     assert _logged("youtube")["state"] == "queued"
+
+
+# ── GBP posts ───────────────────────────────────────────────────────────────
+
+WEBSITE_LINE = "Más videos y reservaciones: https://mariachielcuis.com/"
+
+
+def _enqueue_gbp(when: datetime, **extra) -> str:
+    return media_queue.enqueue({"platform": "gbp", "businessKey": "el-cuis",
+                                "scheduledAt": when.strftime("%Y-%m-%dT%H:%M:%SZ"), "videoSha256": "x",
+                                "imageKey": "images/el-cuis/reloj.jpg", "summary": "Hola mariachi",
+                                "songKey": "reloj", **extra})
+
+
+@pytest.fixture
+def gbp_calls(monkeypatch):
+    import servers.gbp.gbp_client as gc
+    import shared.runtime_config as rc
+    calls = {"create": [], "config": []}
+
+    def fake_config(**kw):
+        calls["config"].append(kw)
+        return {"gbp_location_id": "1"}
+
+    def fake_create(config, **kw):
+        calls["create"].append(kw)
+        out = calls.get("outcome")
+        if isinstance(out, Exception):
+            raise out
+        return {"resourceName": "accounts/1/locations/1/localPosts/9", "searchUrl": "https://g.page/p/9"}
+
+    monkeypatch.setattr(rc, "load_platform_runtime_config", fake_config)
+    monkeypatch.setattr(gc, "create_post", fake_create)
+    monkeypatch.setattr(media_queue, "presigned_get", lambda key, **kw: f"https://s3.test/{key}")
+    return calls
+
+
+def _log_youtube(video_id: str = "vid1", state: str = "queued") -> None:
+    social_ledger.mark("el-cuis", song_key="reloj", sha256="x", platform="youtube", state=state,
+                       scheduled_at="2026-11-12T19:30:00Z", ref=video_id)
+
+
+def _run_gbp():
+    return runner.run_once(now=NOW, publishers={"gbp": runner.publish_gbp_entry})
+
+
+def test_gbp_public_youtube_appends_youtube_link(fake_s3, social_profile_dir, monkeypatch, gbp_calls):
+    _log_queued("e", "gbp")
+    _log_youtube()
+    _enqueue_gbp(NOW - timedelta(minutes=5))
+    _yt_status(monkeypatch, {"privacyStatus": "public", "uploadStatus": "processed", "publishAt": None})
+
+    _run_gbp()
+
+    (call,) = gbp_calls["create"]
+    assert call["summary"] == "Hola mariachi\n\n▶️ Mira el video completo en YouTube: https://youtu.be/vid1"
+    assert call["call_to_action_type"] == "CALL" and call["topic_type"] == "STANDARD"
+    assert call["media_url"] == "https://s3.test/images/el-cuis/reloj.jpg" and call["language_code"] == "es"
+    assert gbp_calls["config"][0]["platform"] == "gbp" and gbp_calls["config"][0]["business_key"] == "el-cuis"
+    (done,) = _states(fake_s3)["done"]
+    assert done["result"]["resourceName"].endswith("localPosts/9")
+    assert done["result"]["searchUrl"] == "https://g.page/p/9" and "youtu.be/vid1" in done["result"]["linkLine"]
+
+
+@pytest.mark.parametrize("setup", ["private", "no_record", "lookup_raises", "no_status", "not_queued"])
+def test_gbp_falls_back_to_website_line(fake_s3, social_profile_dir, monkeypatch, gbp_calls, setup):
+    _log_queued("e", "gbp")
+    if setup != "no_record":
+        _log_youtube(state="failed" if setup == "not_queued" else "queued")
+    status = {"private": {"privacyStatus": "private"}, "no_status": None,
+              "lookup_raises": RuntimeError("boom")}.get(setup, {"privacyStatus": "public"})
+    _yt_status(monkeypatch, status)
+    _enqueue_gbp(NOW - timedelta(minutes=5))
+
+    _run_gbp()
+
+    assert gbp_calls["create"][0]["summary"] == "Hola mariachi\n\n" + WEBSITE_LINE
+    assert len(_states(fake_s3)["done"]) == 1
+
+
+def test_gbp_4xx_fails_entry_and_ledger(fake_s3, social_profile_dir, monkeypatch, gbp_calls):
+    entry_id = _entry_id(_enqueue_gbp(NOW - timedelta(minutes=5)))
+    _log_queued(entry_id, "gbp")
+    _yt_status(monkeypatch, None)
+    gbp_calls["outcome"] = AdsMcpError(status_code=502, error_code="UPSTREAM_ERROR", message="GBP v4 API error: 400",
+                                       retryable=False)
+
+    _run_gbp()
+
+    assert len(_states(fake_s3)["failed"]) == 1
+    assert (_logged("gbp")["state"], _logged("gbp")["ref"]) == ("failed", entry_id)
+
+
+def test_gbp_5xx_is_retried(fake_s3, social_profile_dir, monkeypatch, gbp_calls):
+    _enqueue_gbp(NOW - timedelta(minutes=5))
+    _yt_status(monkeypatch, None)
+    gbp_calls["outcome"] = _transient()
+
+    counts = _run_gbp()
+
+    assert counts["retried"] == 1 and len(_states(fake_s3)["pending"]) == 1
+
+
+def test_gbp_timeout_is_unknown_outcome_ledger_stays_queued(fake_s3, social_profile_dir, monkeypatch, gbp_calls):
+    entry_id = _entry_id(_enqueue_gbp(NOW - timedelta(minutes=5)))
+    _log_queued(entry_id, "gbp")
+    _yt_status(monkeypatch, None)
+    gbp_calls["outcome"] = TimeoutError("read timed out")
+
+    _run_gbp()
+
+    assert len(_states(fake_s3)["failed"]) == 1 and _logged("gbp")["state"] == "queued"
+
+
+def test_main_registers_gbp_publisher(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(runner, "run_once", lambda *, now, publishers: seen.update(publishers) or
+                        {"published": 0, "retried": 0, "failed": 0, "skipped": 0})
+    runner.main()
+    assert seen["gbp"] is runner.publish_gbp_entry
