@@ -11,13 +11,10 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-
+from shared import youtube_client
 from shared.errors import AdsMcpError
 from shared.models import ToolRequest
 from shared.responses import build_success_response
-from shared.runtime_config import load_platform_runtime_config
 
 SERVICE_NAME = "youtube"
 SCOPES = (
@@ -43,34 +40,10 @@ def _today() -> date:
     return date.today()
 
 
-def _load_config(business_key: str, tool: str) -> dict[str, Any]:
-    return load_platform_runtime_config(
-        platform="youtube", business_key=business_key,
-        required_keys=("client_id", "client_secret", "refresh_token"), tool=tool,
-    )
-
-
-def _build_clients(config: dict[str, Any]):
-    """Return (data_api, analytics_api) service clients."""
-    creds = Credentials(
-        token=None, refresh_token=config["refresh_token"], client_id=config["client_id"],
-        client_secret=config["client_secret"], token_uri="https://oauth2.googleapis.com/token",
-        # No scopes here: sending them on refresh fails with invalid_scope if the stored token was
-        # granted a different set; the refresh then returns whatever the user actually granted.
-    )
-    return (build("youtube", "v3", credentials=creds, cache_discovery=False),
-            build("youtubeAnalytics", "v2", credentials=creds, cache_discovery=False))
-
-
-def _upstream(tool: str, exc: Exception) -> AdsMcpError:
-    reason = str(exc)
-    hint = ""
-    if "insufficient" in reason.lower() or "invalid_grant" in reason.lower():
-        hint = " Reconnect with `python scripts/youtube-auth.py`."
-    elif "has not been used" in reason or "accessNotConfigured" in reason:
-        hint = " Enable the YouTube Data API v3 and YouTube Analytics API in the Google Cloud project."
-    return AdsMcpError(status_code=502, error_code="UPSTREAM_ERROR", tool=tool,
-                       message="YouTube API request failed." + hint, details={"reason": reason[:500]})
+# Config, clients and error mapping live in shared.youtube_client (also used by the social runner).
+_load_config = youtube_client.load_config
+_build_clients = youtube_client.build_clients
+_upstream = youtube_client.upstream_error
 
 
 def _channel(data_api, config: dict[str, Any]) -> dict[str, Any]:

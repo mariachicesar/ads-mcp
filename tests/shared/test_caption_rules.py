@@ -57,3 +57,14 @@ def test_phone_rule_blocks_missing_phone():
 
 def test_no_phone_rule_without_profile_phone():
     assert all(c["rule"] != "phone" for c in check_caption(BASE_PROFILE, GOOD_CAPTION))
+
+
+def test_song_name_strips_variant_suffixes():
+    from shared.caption_rules import song_name, starts_with_song
+
+    assert song_name("Reloj Reel.mp4") == "Reloj"
+    assert song_name(r"C:\Ready\Canción Mixteca Post (2).mov") == "Canción Mixteca"
+    assert song_name("El Rey clip ads (3).mp4") == "El Rey"
+    assert song_name("Reel.mp4") == "Reel"
+    assert starts_with_song("CANCION mixteca | En vivo", "Canción Mixteca Post (2).mov")
+    assert not starts_with_song("Mariachi | Reloj", "Reloj Reel.mp4")

@@ -1,17 +1,38 @@
 from __future__ import annotations
 
+import os
 import re
 import unicodedata
 
 from shared.responses import build_rule_check
 
 _HASHTAG_RE = re.compile(r"(?<!\w)#\w+", re.UNICODE)
+_TRAILING_WORDS = {"reel", "post", "clip", "ads"}
+_COPY_SUFFIX_RE = re.compile(r"\s*\(\d+\)\s*$")
 
 
 def _normalize(text: str) -> str:
     decomposed = unicodedata.normalize("NFKD", text.casefold())
     stripped = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
     return re.sub(r"\s+", "", stripped)
+
+
+def song_name(file_name: str) -> str:
+    """Display name of the song in a video file name: the stem minus trailing Reel/Post/clip/ads and "(n)"."""
+    words = os.path.splitext(os.path.basename(file_name))[0].split()
+    while True:
+        text = _COPY_SUFFIX_RE.sub("", " ".join(words)).strip()
+        words = text.split()
+        if len(words) > 1 and words[-1].casefold() in _TRAILING_WORDS:
+            words.pop()
+            continue
+        return text
+
+
+def starts_with_song(text: str, file_name: str) -> bool:
+    """True if `text` begins with the song name, ignoring case, accents and spacing."""
+    song = _normalize(song_name(file_name))
+    return bool(song) and _normalize(text).startswith(song)
 
 
 def has_phone(text: str, phone: str) -> bool:
