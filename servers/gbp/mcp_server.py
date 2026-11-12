@@ -692,5 +692,71 @@ def gbp_delete_photo(
     return _run_tool("gbp_delete_photo", _run)
 
 
+# ---------------------------------------------------------------------------
+# Social companion posts — S3 media queue, posted by run-scheduled-social.py
+# ---------------------------------------------------------------------------
+
+_APPROVAL = Annotated[str | None, Field(description="Omit for a dry run. To execute, pass the approvalId from the dry-run response with identical arguments (expires after 15 minutes).")]
+
+
+def _social_request(business_key: str, approval_id: str | None, payload: dict) -> ToolRequest:
+    return ToolRequest(
+        businessKey=business_key, approvalId=approval_id, dryRun=approval_id is None,
+        payload={k: v for k, v in payload.items() if v is not None},
+    )
+
+
+@mcp.tool()
+def gbp_schedule_social_post(
+    business_key: Annotated[str, Field(description="Business key, e.g. 'el-cuis'")],
+    file_path: Annotated[str, Field(description="Local .mp4/.mov video; one frame becomes the post photo")],
+    scheduled_time: Annotated[str, Field(description="Post time, ISO 8601; naive = America/Los_Angeles. 10 minutes to 75 days from now")],
+    summary: Annotated[str, Field(description="Post text: a hook as the first line, NO phone number (the Call button dials it). Max 1,380 characters; the runner appends the link line")],
+    frame_seconds: Annotated[float | None, Field(description="Second of the video to use as the photo; default 25% of its length")] = None,
+    approval_id: _APPROVAL = None,
+) -> dict:
+    """Schedule a Google Business Profile post (photo from the video + Call button) via the S3 queue.
+
+    The dry run saves the photo locally and returns framePath: show it to the user.
+    IMPORTANT: Call without approval_id first and show the dry-run preview.
+    Only call again with approval_id after the user explicitly approves.
+    """
+    from tools.social_post import schedule_social_post
+
+    request = _social_request(business_key, approval_id, {
+        "filePath": file_path, "scheduledTime": scheduled_time, "summary": summary, "frameSeconds": frame_seconds,
+    })
+    return _run_tool("gbp_schedule_social_post", lambda: schedule_social_post(request, None))
+
+
+@mcp.tool()
+def gbp_list_social_posts(
+    business_key: Annotated[str, Field(description="Business key, e.g. 'el-cuis'")],
+    states: Annotated[list[str] | None, Field(description="Queue states to show (pending, processing, done, failed, cancelled); default pending, processing, failed")] = None,
+) -> dict:
+    """List GBP social posts in the S3 media queue (not the GQ scheduled_posts.json queue)."""
+    from tools.social_post import list_social_posts
+
+    request = _social_request(business_key, None, {"states": states})
+    return _run_tool("gbp_list_social_posts", lambda: list_social_posts(request, None))
+
+
+@mcp.tool()
+def gbp_cancel_social_post(
+    business_key: Annotated[str, Field(description="Business key, e.g. 'el-cuis'")],
+    entry_id: Annotated[str, Field(description="Entry id from gbp_list_social_posts")],
+    approval_id: _APPROVAL = None,
+) -> dict:
+    """Cancel a pending GBP social post before the runner posts it.
+
+    IMPORTANT: Call without approval_id first and show the dry-run preview.
+    Only call again with approval_id after the user explicitly approves.
+    """
+    from tools.social_post import cancel_social_post
+
+    request = _social_request(business_key, approval_id, {"entryId": entry_id})
+    return _run_tool("gbp_cancel_social_post", lambda: cancel_social_post(request, None))
+
+
 if __name__ == "__main__":
     mcp.run()

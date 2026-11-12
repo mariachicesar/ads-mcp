@@ -9,6 +9,8 @@ from shared.responses import build_rule_check
 _HASHTAG_RE = re.compile(r"(?<!\w)#\w+", re.UNICODE)
 _TRAILING_WORDS = {"reel", "post", "clip", "ads"}
 _COPY_SUFFIX_RE = re.compile(r"\s*\(\d+\)\s*$")
+_PHONE_SEP = r"[\s./\u2010-\u2015\u2212-]*"  # whitespace, dot, slash, hyphen, Unicode dashes, minus
+_PHONE_LIKE_RE = re.compile(rf"(?:\+?1{_PHONE_SEP})?\(?\d{{3}}\)?{_PHONE_SEP}\d{{3}}{_PHONE_SEP}\d{{4}}|\d{{10,}}")
 
 
 def _normalize(text: str) -> str:
@@ -53,12 +55,15 @@ def _check(rule: str, passed: bool, ok_msg: str, fail_msg: str) -> dict:
     )
 
 
-def check_caption(profile: dict, caption: str | None) -> list[dict]:
-    text = caption or ""
-    max_chars = int(profile.get("hookMaxChars", 150))
+def looks_like_phone(text: str | None) -> bool:
+    """True if `text` holds anything shaped like a US phone number (any separators, or a 10+ digit run)."""
+    return bool(_PHONE_LIKE_RE.search(text or ""))
 
-    # Hook: first non-empty line.
-    hook = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
+
+def check_hook(profile: dict, text: str | None) -> dict:
+    """The "caption-hook" rule: the first non-empty line is short text, not a hashtag or link."""
+    max_chars = int(profile.get("hookMaxChars", 150))
+    hook = next((ln.strip() for ln in (text or "").splitlines() if ln.strip()), "")
     if not hook:
         hook_ok, hook_fail = False, "Caption is missing; it needs a hook as its first line."
     elif len(hook) > max_chars:
@@ -67,6 +72,11 @@ def check_caption(profile: dict, caption: str | None) -> list[dict]:
         hook_ok, hook_fail = False, "Hook (first line) must be text, not a hashtag or link."
     else:
         hook_ok, hook_fail = True, ""
+    return _check("caption-hook", hook_ok, "Caption hook is valid.", hook_fail)
+
+
+def check_caption(profile: dict, caption: str | None) -> list[dict]:
+    text = caption or ""
 
     # Link.
     domain = re.escape(profile.get("websiteDomain", ""))
@@ -89,7 +99,7 @@ def check_caption(profile: dict, caption: str | None) -> list[dict]:
     city_ok = any(_normalize(c) in norm for c in cities)
 
     checks = [
-        _check("caption-hook", hook_ok, "Caption hook is valid.", hook_fail),
+        check_hook(profile, text),
         _check("caption-https-link", link_passed, "Caption has an https link to the business site.", link_fail),
         _check("caption-hashtags", has_tags, "Caption has hashtags.", "Caption is missing hashtags."),
         _check("caption-city", city_ok, "Caption mentions a service city.",

@@ -85,3 +85,22 @@ def test_claim_to_processing_is_exclusive_even_if_source_still_readable(fake_s3)
 
     with pytest.raises(KeyError):
         media_queue.move(key, "processing")
+
+
+def test_put_image_stores_jpeg_once(fake_s3, tmp_path):
+    f = tmp_path / "frame.jpg"
+    f.write_bytes(b"jpeg")
+    calls = []
+    real = fake_s3.upload_file
+
+    def upload_file(Filename, Bucket, Key, ExtraArgs=None):
+        calls.append(ExtraArgs)
+        return real(Filename, Bucket, Key, ExtraArgs)
+
+    fake_s3.upload_file = upload_file
+    k1 = media_queue.put_image(business_key="el-cuis", file_path=str(f), sha256="cafe")
+    k2 = media_queue.put_image(business_key="el-cuis", file_path=str(f), sha256="cafe")
+
+    assert k1 == k2 == "images/el-cuis/cafe.jpg"
+    assert fake_s3.objects[k1] == b"jpeg"
+    assert calls == [{"ContentType": "image/jpeg"}]

@@ -2,6 +2,7 @@
 
 Layout in the bucket named by ADS_MCP_MEDIA_BUCKET:
     videos/<businessKey>/<sha256>.<ext>                  the video, stored once per content hash
+    images/<businessKey>/<sha256>.jpg                    a still image (GBP post photo), stored once per hash
     queue/<state>/<YYYYMMDDTHHMMZ>-<id>.json             one entry per scheduled post
 
 A state change is copy-to-new-prefix then delete-old. Because `move` reads the
@@ -64,6 +65,20 @@ def put_video(*, business_key: str, file_path: str, sha256: str, bucket: str | N
         if not _is_missing(client, exc):
             raise
     client.upload_file(file_path, name, key, ExtraArgs={"ContentType": "video/mp4" if ext == ".mp4" else "video/quicktime"})
+    return key
+
+
+def put_image(*, business_key: str, file_path: str, sha256: str, bucket: str | None = None) -> str:
+    """Upload a local JPEG (e.g. a GBP post photo) under its content hash; skip it if it already exists."""
+    name, client = _bucket(bucket), _s3_client()
+    key = f"images/{business_key}/{sha256}.jpg"
+    try:
+        client.head_object(Bucket=name, Key=key)
+        return key
+    except Exception as exc:  # noqa: BLE001 - boto raises ClientError(404) for a missing key
+        if not _is_missing(client, exc):
+            raise
+    client.upload_file(file_path, name, key, ExtraArgs={"ContentType": "image/jpeg"})
     return key
 
 

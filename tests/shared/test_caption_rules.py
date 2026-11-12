@@ -68,3 +68,25 @@ def test_song_name_strips_variant_suffixes():
     assert song_name("Reel.mp4") == "Reel"
     assert starts_with_song("CANCION mixteca | En vivo", "Canción Mixteca Post (2).mov")
     assert not starts_with_song("Mariachi | Reloj", "Reloj Reel.mp4")
+
+
+def test_check_hook_matches_check_caption_hook(profile):
+    from shared.caption_rules import check_hook
+
+    for text in (GOOD, None, "", "#tag\nhola", "x" * 151, "https://x.com\nhola"):
+        assert check_hook(profile, text) == _rule(check_caption(profile, text), "caption-hook")
+
+
+@pytest.mark.parametrize("text", ["626-922-0091", "(626) 922-0091", "626/922/0091", "626–922–0091",
+                                  "+1 626 922 0091", "6269220091", "llama 818.555.1234"])
+def test_looks_like_phone(text):
+    from shared.caption_rules import looks_like_phone
+
+    assert looks_like_phone("Serenata " + text + " hoy")
+
+
+@pytest.mark.parametrize("text", ["Desde 2026 en Downey", "Mariachi El Cuis 🎺", "12 músicos, 3 horas", ""])
+def test_looks_like_phone_ignores_plain_numbers(text):
+    from shared.caption_rules import looks_like_phone
+
+    assert not looks_like_phone(text)
