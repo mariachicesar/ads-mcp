@@ -19,7 +19,7 @@ from typing import Any, Callable
 from shared import media_queue
 
 STATES = ("queued", "failed", "cancelled")
-PLATFORMS = ("facebook", "instagram", "tiktok")
+PLATFORMS = ("facebook", "instagram", "tiktok", "youtube", "gbp")
 MAX_ATTEMPTS = 3
 log = logging.getLogger(__name__)
 _TRAILING_WORDS = {"reel", "post", "clip", "ads"}

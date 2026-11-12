@@ -14,6 +14,15 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", "", stripped)
 
 
+def has_phone(text: str, phone: str) -> bool:
+    """True if `text` contains `phone` (compared on its last 10 digits) in any common format."""
+    want = re.sub(r"\D", "", phone or "")[-10:]
+    if len(want) < 10:
+        return False
+    squeezed = re.sub(r"[\s.\-()]", "", text or "")
+    return any(want in run for run in re.findall(r"\d+", squeezed))
+
+
 def _check(rule: str, passed: bool, ok_msg: str, fail_msg: str) -> dict:
     return build_rule_check(
         rule=rule,
@@ -58,10 +67,15 @@ def check_caption(profile: dict, caption: str | None) -> list[dict]:
     cities = profile.get("serviceCities", [])
     city_ok = any(_normalize(c) in norm for c in cities)
 
-    return [
+    checks = [
         _check("caption-hook", hook_ok, "Caption hook is valid.", hook_fail),
         _check("caption-https-link", link_passed, "Caption has an https link to the business site.", link_fail),
         _check("caption-hashtags", has_tags, "Caption has hashtags.", "Caption is missing hashtags."),
         _check("caption-city", city_ok, "Caption mentions a service city.",
                "Caption does not mention any service city: " + ", ".join(cities) + "."),
     ]
+    phone = profile.get("phone")
+    if phone:
+        checks.append(_check("phone", has_phone(text, phone), "Caption includes the business phone number.",
+                             f"Caption is missing the business phone number {phone}."))
+    return checks

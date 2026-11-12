@@ -167,3 +167,9 @@ def test_run_and_mark_platform_error_survives_failed_mark_error(fake_s3, monkeyp
     monkeypatch.setattr(social_ledger, "mark", broken)
     with pytest.raises(ValueError, match="platform said no"):
         _run(platform_call)
+
+
+def test_ledger_accepts_youtube_and_gbp(fake_s3):
+    for p in ("youtube", "gbp"):
+        assert social_ledger.mark("el-cuis", song_key="reloj", sha256="x", platform=p, state="queued",
+                                  scheduled_at="2026-11-20T03:00:00Z", ref="r")
