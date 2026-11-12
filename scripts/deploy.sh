@@ -31,7 +31,7 @@ tar -czf - \
 echo "==> Installing/updating Python dependencies"
 $SSH "$REMOTE_HOST" bash -s <<ENDSSH
 set -e
-for svc in google-ads meta-ads analytics search-console content-agent gbp orchestrator tiktok; do
+for svc in google-ads meta-ads analytics search-console content-agent gbp orchestrator tiktok youtube; do
     req="$REMOTE_DIR/servers/\$svc/requirements.txt"
     if [[ -f "\$req" ]]; then
         "$VENV/bin/pip" install --quiet -r "\$req"

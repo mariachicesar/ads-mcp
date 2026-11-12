@@ -78,6 +78,53 @@ def publish_tiktok_entry(entry: dict[str, Any]) -> dict[str, Any]:
     return {**sent, "note": note}
 
 
+class UnknownOutcome(Exception):
+    """The post may or may not be live; fail the queue entry but leave the posting log "queued"."""
+
+
+class CancelledByUser(Exception):
+    """The user cancelled this post while the entry was waiting; nothing to verify."""
+
+
+def verify_youtube_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    """Check that a scheduled YouTube video went public after its slot (Task 3 "verify" entry)."""
+    from shared.youtube_client import youtube_status  # lazy: runner must start without the Google libs
+
+    video_id, business_key = entry["videoId"], entry["businessKey"]
+    last_attempt = int(entry.get("attempts") or 0) + 1 >= MAX_ATTEMPTS
+    not_public = f"YouTube video {video_id} is not public after its slot; check YouTube Studio"
+    try:
+        status = youtube_status(business_key, video_id)
+    except Exception as exc:  # noqa: BLE001 - could not check: retry, then give up without re-offering
+        if last_attempt:
+            raise UnknownOutcome(not_public) from exc
+        raise AdsMcpError(status_code=502, error_code="UPSTREAM_ERROR", tool="youtube_verify", retryable=True,
+                          message=f"could not check YouTube video {video_id}: {type(exc).__name__}: {exc}") from exc
+    if status is None:
+        if _youtube_cancelled(entry):
+            raise CancelledByUser(f"YouTube video {video_id} was cancelled")
+        raise UnknownOutcome(not_public)
+    if status.get("privacyStatus") == "public":
+        return {"videoId": video_id, "privacyStatus": "public"}
+    if last_attempt:
+        raise UnknownOutcome(not_public)
+    raise AdsMcpError(status_code=409, error_code="NOT_READY", tool="youtube_verify", retryable=True,
+                      message=f"YouTube video {video_id} is still {status.get('privacyStatus')}")
+
+
+def _youtube_cancelled(entry: dict[str, Any]) -> bool:
+    try:
+        sha = entry.get("videoSha256")
+        song = social_ledger.song_for_sha(entry["businessKey"], sha) if sha else None
+        if song is None:
+            return False
+        record = social_ledger.load(entry["businessKey"])["songs"][song]["platforms"].get("youtube") or {}
+        return record.get("state") == "cancelled"
+    except Exception:  # noqa: BLE001 - unreadable log: treat as not cancelled (unknown outcome)
+        log.exception("could not read the posting log for %s", entry.get("id"))
+        return False
+
+
 def _log_failed(entry: dict[str, Any]) -> None:
     """Mark this entry's platform failed in the posting log; never affects publishing.
 
@@ -116,7 +163,8 @@ def _reason(exc: AdsMcpError) -> str:
 def _handle_processing(entry: dict[str, Any], now: datetime, counts: dict[str, int]) -> None:
     claimed = entry.get("claimedAt")
     if claimed and now - _parse(claimed) > STALE_PROCESSING_AFTER:
-        platform = {"instagram": "Instagram", "tiktok": "the TikTok inbox"}.get(entry.get("platform"), "the platform")
+        platform = {"instagram": "Instagram", "tiktok": "the TikTok inbox", "youtube": "YouTube Studio",
+                                                   "gbp": "the Google Business Profile"}.get(entry.get("platform"), "the platform")
         _fail(entry["_key"], entry, f"stale processing; check {platform} before retrying", counts, definite=False)
 
 
@@ -140,6 +188,13 @@ def _handle_pending(entry: dict[str, Any], now: datetime, publishers: dict[str, 
         return
     try:
         result = publisher(entry)
+    except CancelledByUser as exc:
+        media_queue.move(key, "cancelled", updates={"attempts": attempts, "lastError": str(exc)})
+        log.info("cancelled %s %s: %s", entry.get("platform"), entry.get("id"), exc)
+        return
+    except UnknownOutcome as exc:
+        _fail(key, entry, str(exc), counts, definite=False, attempts=attempts)
+        return
     except AdsMcpError as exc:
         reason = _reason(exc)
         if exc.retryable and attempts < MAX_ATTEMPTS:
@@ -188,7 +243,8 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)s  %(message)s",
                         datefmt="%Y-%m-%dT%H:%M:%S")
     counts = run_once(now=datetime.now(timezone.utc), publishers={"instagram": publish_instagram_entry,
-                                                                  "tiktok": publish_tiktok_entry})
+                                                                  "tiktok": publish_tiktok_entry,
+                                                                  "youtube": verify_youtube_entry})
     log.info("run complete: %s", counts)
     return 1 if counts["failed"] else 0
 

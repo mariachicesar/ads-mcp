@@ -382,3 +382,104 @@ def test_unknown_exception_keeps_ledger_queued(fake_s3, social_profile_dir):
 
     assert len(_states(fake_s3)["failed"]) == 1
     assert _logged()["state"] == "queued"
+
+
+# ── YouTube verify entries ──────────────────────────────────────────────────
+
+def _enqueue_youtube(when: datetime, **extra) -> str:
+    return media_queue.enqueue({"platform": "youtube", "businessKey": "el-cuis",
+                                "scheduledAt": when.strftime("%Y-%m-%dT%H:%M:%SZ"), "videoSha256": "x",
+                                "videoId": "vid1", "publishAt": "2026-11-12T19:30:00Z", **extra})
+
+
+def _yt_status(monkeypatch, *statuses):
+    import shared.youtube_client as yc
+    seq = list(statuses)
+
+    def fake(business_key, video_id):
+        out = seq.pop(0) if len(seq) > 1 else seq[0]
+        if isinstance(out, Exception):
+            raise out
+        return out
+    monkeypatch.setattr(yc, "youtube_status", fake)
+
+
+def _run_yt(now=NOW):
+    return runner.run_once(now=now, publishers={"youtube": runner.verify_youtube_entry})
+
+
+def test_youtube_public_marks_done(fake_s3, social_profile_dir, monkeypatch):
+    entry_id = _entry_id(_enqueue_youtube(NOW - timedelta(minutes=5)))
+    _log_queued(entry_id, "youtube")
+    _yt_status(monkeypatch, {"privacyStatus": "public", "uploadStatus": "processed", "publishAt": None})
+
+    _run_yt()
+
+    done = _states(fake_s3)["done"]
+    assert len(done) == 1 and done[0]["result"] == {"videoId": "vid1", "privacyStatus": "public"}
+    assert _logged("youtube")["state"] == "queued"
+
+
+def test_youtube_still_private_retries_then_fails_without_ledger(fake_s3, social_profile_dir, monkeypatch):
+    entry_id = _entry_id(_enqueue_youtube(NOW - timedelta(minutes=5)))
+    _log_queued(entry_id, "youtube")
+    _yt_status(monkeypatch, {"privacyStatus": "private", "uploadStatus": "processed", "publishAt": "x"})
+
+    _run_yt()
+    _run_yt()
+    assert len(_states(fake_s3).get("pending", [])) == 1
+    _run_yt()
+
+    failed = _states(fake_s3)["failed"]
+    assert len(failed) == 1
+    assert failed[0]["lastError"] == "YouTube video vid1 is not public after its slot; check YouTube Studio"
+    assert _logged("youtube")["state"] == "queued"
+
+
+def test_youtube_video_missing_is_unknown_outcome(fake_s3, social_profile_dir, monkeypatch):
+    _log_queued(_entry_id(_enqueue_youtube(NOW - timedelta(minutes=5))), "youtube")
+    _yt_status(monkeypatch, None)
+
+    _run_yt()
+
+    assert len(_states(fake_s3)["failed"]) == 1 and "pending" not in _states(fake_s3)
+    assert _logged("youtube")["state"] == "queued"
+
+
+def test_youtube_missing_but_cancelled_in_log_moves_to_cancelled(fake_s3, social_profile_dir, monkeypatch):
+    entry_id = _entry_id(_enqueue_youtube(NOW - timedelta(minutes=5)))
+    _log_queued(entry_id, "youtube")
+    social_ledger.mark_cancelled("el-cuis", sha256="x", platform="youtube", scheduled_at=None, ref=entry_id)
+    assert _logged("youtube")["state"] == "cancelled"
+    _yt_status(monkeypatch, None)
+
+    counts = _run_yt()
+
+    assert len(_states(fake_s3)["cancelled"]) == 1 and "failed" not in _states(fake_s3)
+    assert counts["failed"] == 0
+
+
+def test_youtube_transient_api_error_retries_then_unknown(fake_s3, social_profile_dir, monkeypatch):
+    _log_queued(_entry_id(_enqueue_youtube(NOW - timedelta(minutes=5))), "youtube")
+    _yt_status(monkeypatch, OSError("socket timeout"))
+
+    for _ in range(3):
+        _run_yt()
+
+    assert len(_states(fake_s3)["failed"]) == 1
+    assert _logged("youtube")["state"] == "queued"
+
+
+def test_main_registers_youtube_publisher(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(runner, "run_once", lambda *, now, publishers: seen.update(publishers) or
+                        {"published": 0, "retried": 0, "failed": 0, "skipped": 0})
+    runner.main()
+    assert seen["youtube"] is runner.verify_youtube_entry
+
+
+def test_stale_youtube_processing_names_youtube_studio(fake_s3):
+    key = _enqueue_youtube(NOW - timedelta(hours=3))
+    media_queue.move(key, "processing", updates={"claimedAt": (NOW - timedelta(minutes=61)).strftime("%Y-%m-%dT%H:%M:%SZ")})
+    runner.run_once(now=NOW, publishers={})
+    assert _states(fake_s3)["failed"][0]["lastError"] == "stale processing; check YouTube Studio before retrying"
