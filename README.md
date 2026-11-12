@@ -462,7 +462,7 @@ The `tiktok` MCP server queues videos in the same S3 queue (`platform: "tiktok"`
 
 **One-time setup**
 
-1. In the Google Cloud project used for the other Google servers, enable **YouTube Data API v3** and **YouTube Analytics API**, and add the scopes `youtube.readonly`, `yt-analytics.readonly` and `youtube.upload` to the OAuth consent screen.
+1. In the Google Cloud project used for the other Google servers, enable **YouTube Data API v3** and **YouTube Analytics API**, and add the scopes `youtube.readonly`, `yt-analytics.readonly` and `youtube.force-ssl` to the OAuth consent screen (`youtube.force-ssl` rather than `youtube.upload`: cancelling a scheduled upload calls `videos.delete`, which `youtube.upload` does not allow).
 2. `pip install google-auth-oauthlib`, then `python scripts/youtube-auth.py --business-key el-cuis` (set `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` to the El Cuis Google project; the script requests all 3 scopes and explains any that were not granted). Sign in with the Google account that owns the channel. This saves `/ads-mcp/el-cuis/youtube/config` (add `--channel-id UC...` if the account manages several channels).
 3. Register it: `claude mcp add youtube -s local -- .venv/Scripts/python.exe servers/youtube/local_stdio.py` (needs `ADS_MCP_MEDIA_BUCKET` in `.env` because the schedule tools write the S3 queue), or add a `youtube` entry to `claude_desktop_config.json` like `search-console`, then restart.
 

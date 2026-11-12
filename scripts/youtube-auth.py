@@ -28,7 +28,9 @@ from shared.config import get_settings  # noqa: E402
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.readonly",
     "https://www.googleapis.com/auth/yt-analytics.readonly",
-    "https://www.googleapis.com/auth/youtube.upload",
+    # force-ssl (not youtube.upload) because videos.delete — used to cancel a scheduled
+    # upload and to clean up rejected uploads — is only granted by this broader scope.
+    "https://www.googleapis.com/auth/youtube.force-ssl",
 ]
 
 

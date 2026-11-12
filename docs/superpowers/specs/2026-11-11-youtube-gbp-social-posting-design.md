@@ -169,8 +169,9 @@ that fails is offered again.
   plus `youtube_list_scheduled` and `youtube_cancel_scheduled` (deletes the
   private video before its publish time), matching the other platforms'
   tool sets.
-- `scripts/youtube-auth.py` adds the `youtube.upload` scope (plus whatever
-  delete/status reads need); the user re-runs it once.
+- `scripts/youtube-auth.py` adds the `youtube.force-ssl` scope (upload plus the
+  `videos.delete` cancel/cleanup calls, which `youtube.upload` alone does not
+  allow); the user re-runs it once.
 
 ### 5. GBP post
 
