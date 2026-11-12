@@ -483,3 +483,21 @@ def test_stale_youtube_processing_names_youtube_studio(fake_s3):
     media_queue.move(key, "processing", updates={"claimedAt": (NOW - timedelta(minutes=61)).strftime("%Y-%m-%dT%H:%M:%SZ")})
     runner.run_once(now=NOW, publishers={})
     assert _states(fake_s3)["failed"][0]["lastError"] == "stale processing; check YouTube Studio before retrying"
+
+
+def test_youtube_missed_verify_keeps_ledger_queued(fake_s3, social_profile_dir):
+    _log_queued(_entry_id(_enqueue_youtube(NOW - timedelta(hours=25))), "youtube")
+
+    runner.run_once(now=NOW, publishers={"youtube": Publisher()})
+
+    assert len(_states(fake_s3)["failed"]) == 1
+    assert _logged("youtube")["state"] == "queued"
+
+
+def test_youtube_without_publisher_keeps_ledger_queued(fake_s3, social_profile_dir):
+    _log_queued(_entry_id(_enqueue_youtube(NOW - timedelta(minutes=5))), "youtube")
+
+    runner.run_once(now=NOW, publishers={})
+
+    assert len(_states(fake_s3)["failed"]) == 1
+    assert _logged("youtube")["state"] == "queued"

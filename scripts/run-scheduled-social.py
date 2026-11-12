@@ -173,7 +173,8 @@ def _handle_pending(entry: dict[str, Any], now: datetime, publishers: dict[str, 
     if due > now:
         return
     if now - due > MISSED_AFTER:
-        _fail(entry["_key"], entry, "missed: more than 24h late", counts)
+        _fail(entry["_key"], entry, "missed: more than 24h late", counts,
+              definite=entry.get("platform") != "youtube")  # youtube: video already uploaded
         return
     try:
         key = media_queue.move(entry["_key"], "processing", updates={"claimedAt": _iso(datetime.now(timezone.utc))})
@@ -184,7 +185,8 @@ def _handle_pending(entry: dict[str, Any], now: datetime, publishers: dict[str, 
     attempts = int(entry.get("attempts") or 0) + 1
     publisher = publishers.get(entry.get("platform"))
     if publisher is None:
-        _fail(key, entry, f"no publisher for platform {entry.get('platform')!r}", counts, attempts=attempts)
+        _fail(key, entry, f"no publisher for platform {entry.get('platform')!r}", counts,
+              definite=entry.get("platform") != "youtube", attempts=attempts)
         return
     try:
         result = publisher(entry)
