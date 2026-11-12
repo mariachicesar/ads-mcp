@@ -181,3 +181,45 @@ def test_order_oldest_first(scan):
     make("A Reel.mp4", AFTER + 200)
     make("C Reel.mp4", AFTER)
     assert [c["songKey"] for c in run()["candidates"]] == ["c", "b", "a"]
+
+
+T0 = "2026-11-12T00:00:00Z"
+ALL3 = {"facebook": "queued", "instagram": "queued", "tiktok": "queued"}
+
+
+@pytest.fixture
+def with_youtube(profile):
+    profile["platforms"] = [*profile["platforms"], "youtube"]
+    profile["platformStarts"] = {"youtube": {"at": T0, "excludeSongs": ["reloj"]}}
+    return profile
+
+
+def test_snapshot_song_never_offered_new_platform(scan, with_youtube):
+    make, run = scan
+    path = make("Reloj Reel.mp4")
+    sha = scheduling.sha256_file(path)
+    out = run(_logged(sha, {"facebook": "failed", "instagram": "queued", "tiktok": "cancelled"}))
+    assert out["candidates"]
+    assert all("youtube" not in c["missingPlatforms"] for c in out["candidates"])
+
+
+def test_snapshot_song_reexport_not_offered(scan, with_youtube):
+    make, run = scan
+    make("Reloj2 Reel.mp4", LATER)
+    out = run(_logged("gone", {"facebook": "queued", "instagram": "queued", "tiktok": "failed"}))
+    cand = out["candidates"][0]
+    assert cand["possibleRepeat"] and "youtube" not in cand["missingPlatforms"]
+
+
+def test_snapshot_song_done_elsewhere_is_skipped(scan, with_youtube):
+    make, run = scan
+    make("Reloj2 Reel.mp4", LATER)
+    out = run(_logged("gone", ALL3))
+    assert out["candidates"] == []
+    assert [s["reason"] for s in out["skipped"]] == ["song already scheduled on every platform"]
+
+
+def test_new_song_after_start_gets_new_platform(scan, with_youtube):
+    make, run = scan
+    make("Grito Reel.mp4")
+    assert "youtube" in run()["candidates"][0]["missingPlatforms"]

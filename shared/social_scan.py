@@ -53,6 +53,8 @@ def find_new_videos(profile: dict[str, Any], ledger: dict[str, Any], *, folder: 
     cutoff = _parse_utc(profile["baselineCutoff"])
     platforms = list(profile["platforms"])
     songs = ledger.get("songs", {})
+    # Songs already scheduled when a platform was switched on never get that platform (no backfill).
+    excluded = {p: set(v.get("excludeSongs", ())) for p, v in profile.get("platformStarts", {}).items()}
     sha_to_song = {sha: key for key, song in songs.items() for sha in song.get("files", [])}
     queued_in_queue: dict[str, set[str]] = {}
     for entry in queue_entries:
@@ -88,7 +90,7 @@ def find_new_videos(profile: dict[str, Any], ledger: dict[str, Any], *, folder: 
         # A file already logged or queued by hash is this song's own post, so its gaps are retries.
         matched = sha in sha_to_song or sha in queued_in_queue
         # Platforms already queued for the song are never offered again, whichever cut queued them.
-        missing = [p for p in platforms if p not in queued_for(key, sha)]
+        missing = [p for p in platforms if p not in queued_for(key, sha) and key not in excluded.get(p, ())]
         if matched:
             if not missing:
                 continue
