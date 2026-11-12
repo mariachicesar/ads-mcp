@@ -103,6 +103,8 @@ def publish_gbp_entry(entry: dict[str, Any]) -> dict[str, Any]:
 
     gbp_client raises AdsMcpError(retryable=False) for 4xx (definite failure) and retryable=True for
     5xx, which is turned into UnknownOutcome (never retried: a duplicate post is worse); a timeout/connection error is not an AdsMcpError, so the runner treats it as unknown outcome.
+    Exception: a token-refresh failure (UPSTREAM_AUTH_ERROR) happens before the POST is sent, so it
+    is re-raised as-is and the runner retries it safely.
     """
     from servers.gbp.gbp_client import create_post  # lazy: Google libs are not needed by other platforms
     from shared.runtime_config import load_platform_runtime_config
@@ -118,7 +120,8 @@ def publish_gbp_entry(entry: dict[str, Any]) -> dict[str, Any]:
             config, summary=entry["summary"] + "\n\n" + link_line, topic_type="STANDARD",
             call_to_action_type="CALL", media_url=media_queue.presigned_get(entry["imageKey"]), language_code="es")
     except AdsMcpError as exc:
-        if exc.retryable:  # 5xx on a non-idempotent POST: the post may exist; retrying could duplicate it
+        if exc.retryable and exc.error_code != "UPSTREAM_AUTH_ERROR":
+            # 5xx on a non-idempotent POST: the post may exist; retrying could duplicate it
             raise UnknownOutcome("Google Business Profile returned a server error; check the El Cuis Business "
                                  "Profile posts before re-scheduling this post") from exc
         raise

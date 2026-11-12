@@ -608,6 +608,27 @@ def test_gbp_5xx_is_unknown_outcome_not_retried(fake_s3, social_profile_dir, mon
     assert _logged("gbp")["state"] == "queued"
 
 
+def test_gbp_token_refresh_failure_is_retried_not_unknown(fake_s3, social_profile_dir, monkeypatch, gbp_calls):
+    entry_id = _entry_id(_enqueue_gbp(NOW - timedelta(minutes=5)))
+    _log_queued(entry_id, "gbp")
+    _yt_status(monkeypatch, None)
+    gbp_calls["outcome"] = AdsMcpError(status_code=502, error_code="UPSTREAM_AUTH_ERROR",
+                                       message="Could not refresh the GBP access token: boom", retryable=True)
+
+    counts = _run_gbp()
+
+    # The refresh happens before the localPosts POST, so nothing was posted: retry, never unknown outcome.
+    assert counts["retried"] == 1 and "failed" not in _states(fake_s3)
+    (pending,) = _states(fake_s3)["pending"]
+    assert pending["attempts"] == 1 and "access token" in pending["lastError"]
+    assert _logged("gbp")["state"] == "queued"
+
+    del gbp_calls["outcome"]
+    counts = _run_gbp()
+
+    assert counts["published"] == 1 and len(_states(fake_s3)["done"]) == 1
+
+
 def test_gbp_requires_account_id_and_config_error_precedes_post(fake_s3, social_profile_dir, monkeypatch, gbp_calls):
     import shared.runtime_config as rc
 

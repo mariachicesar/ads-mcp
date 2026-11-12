@@ -81,7 +81,17 @@ def _access_token(config: dict[str, Any], *, tool: str | None = None) -> str:
     from google.auth.transport.requests import Request as GoogleAuthRequest
 
     creds = _build_credentials(config, tool=tool)
-    creds.refresh(GoogleAuthRequest())
+    try:
+        creds.refresh(GoogleAuthRequest())
+    except Exception as exc:  # noqa: BLE001 - google.auth raises its own exception types
+        # Happens strictly before any API request is sent, so callers may safely retry.
+        raise AdsMcpError(
+            status_code=502,
+            error_code="UPSTREAM_AUTH_ERROR",
+            message=f"Could not refresh the GBP access token: {exc}",
+            tool=tool,
+            retryable=True,
+        ) from exc
     return creds.token
 
 
