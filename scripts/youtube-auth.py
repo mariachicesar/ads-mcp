@@ -1,4 +1,4 @@
-"""Connect a business's YouTube channel once, for the read-only youtube MCP server.
+"""Connect a business's YouTube channel once, for the youtube MCP server (reads + scheduled uploads).
 
     python scripts/youtube-auth.py [--business-key el-cuis] [--channel-id UC...]
 
@@ -8,7 +8,7 @@ that owns the channel and allow access. The refresh token is saved to
 /ads-mcp/<business>/youtube/config in Secrets Manager and never printed.
 
 Before running: in the Google Cloud project, enable "YouTube Data API v3" and
-"YouTube Analytics API", and add the two scopes below to the OAuth consent screen.
+"YouTube Analytics API", and add the three scopes below to the OAuth consent screen.
 """
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ from shared.config import get_settings  # noqa: E402
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.readonly",
     "https://www.googleapis.com/auth/yt-analytics.readonly",
+    "https://www.googleapis.com/auth/youtube.upload",
 ]
 
 
@@ -64,7 +65,7 @@ def main() -> int:
     missing = [sc for sc in SCOPES if sc not in granted]
     if missing:
         print("Not connected: Google did not grant " + ", ".join(sc.rsplit("/", 1)[-1] for sc in missing) + ". "
-              "On the Google consent screen, tick BOTH YouTube boxes. If the boxes are not shown, add these "
+              "On the Google consent screen, tick ALL the YouTube boxes. If the boxes are not shown, add these "
               "scopes under Google Cloud > OAuth consent screen > Data access, then run this again.",
               file=sys.stderr)
         return 1
