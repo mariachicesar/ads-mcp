@@ -102,19 +102,26 @@ def publish_gbp_entry(entry: dict[str, Any]) -> dict[str, Any]:
     """Publish a Google Business Profile post (STANDARD, Call button, one photo).
 
     gbp_client raises AdsMcpError(retryable=False) for 4xx (definite failure) and retryable=True for
-    5xx; a timeout/connection error is not an AdsMcpError, so the runner treats it as unknown outcome.
+    5xx, which is turned into UnknownOutcome (never retried: a duplicate post is worse); a timeout/connection error is not an AdsMcpError, so the runner treats it as unknown outcome.
     """
     from servers.gbp.gbp_client import create_post  # lazy: Google libs are not needed by other platforms
     from shared.runtime_config import load_platform_runtime_config
 
     config = load_platform_runtime_config(
         platform="gbp", business_key=entry["businessKey"],
-        required_keys=("client_id", "client_secret", "refresh_token", "gbp_location_id"),
+        required_keys=("client_id", "client_secret", "refresh_token", "gbp_account_id",
+                       "gbp_location_id"),
         tool="run-scheduled-social")
     link_line = _gbp_link_line(entry)
-    post = create_post(
-        config, summary=entry["summary"] + "\n\n" + link_line, topic_type="STANDARD",
-        call_to_action_type="CALL", media_url=media_queue.presigned_get(entry["imageKey"]), language_code="es")
+    try:
+        post = create_post(
+            config, summary=entry["summary"] + "\n\n" + link_line, topic_type="STANDARD",
+            call_to_action_type="CALL", media_url=media_queue.presigned_get(entry["imageKey"]), language_code="es")
+    except AdsMcpError as exc:
+        if exc.retryable:  # 5xx on a non-idempotent POST: the post may exist; retrying could duplicate it
+            raise UnknownOutcome("Google Business Profile returned a server error; check the El Cuis Business "
+                                 "Profile posts before re-scheduling this post") from exc
+        raise
     return {"resourceName": post.get("resourceName"), "searchUrl": post.get("searchUrl"), "linkLine": link_line}
 
 

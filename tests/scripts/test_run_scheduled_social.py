@@ -594,14 +594,34 @@ def test_gbp_4xx_fails_entry_and_ledger(fake_s3, social_profile_dir, monkeypatch
     assert (_logged("gbp")["state"], _logged("gbp")["ref"]) == ("failed", entry_id)
 
 
-def test_gbp_5xx_is_retried(fake_s3, social_profile_dir, monkeypatch, gbp_calls):
-    _enqueue_gbp(NOW - timedelta(minutes=5))
+def test_gbp_5xx_is_unknown_outcome_not_retried(fake_s3, social_profile_dir, monkeypatch, gbp_calls):
+    entry_id = _entry_id(_enqueue_gbp(NOW - timedelta(minutes=5)))
+    _log_queued(entry_id, "gbp")
     _yt_status(monkeypatch, None)
     gbp_calls["outcome"] = _transient()
 
     counts = _run_gbp()
 
-    assert counts["retried"] == 1 and len(_states(fake_s3)["pending"]) == 1
+    assert counts["retried"] == 0 and len(gbp_calls["create"]) == 1
+    (failed,) = _states(fake_s3)["failed"]
+    assert "check the El Cuis Business Profile posts" in failed["lastError"]
+    assert _logged("gbp")["state"] == "queued"
+
+
+def test_gbp_requires_account_id_and_config_error_precedes_post(fake_s3, social_profile_dir, monkeypatch, gbp_calls):
+    import shared.runtime_config as rc
+
+    def missing(**kw):
+        gbp_calls["config"].append(kw)
+        raise AdsMcpError(status_code=500, error_code="INTERNAL_ERROR", message="missing gbp_account_id")
+
+    monkeypatch.setattr(rc, "load_platform_runtime_config", missing)
+    _enqueue_gbp(NOW - timedelta(minutes=5))
+
+    _run_gbp()
+
+    assert "gbp_account_id" in gbp_calls["config"][0]["required_keys"]
+    assert gbp_calls["create"] == [] and len(_states(fake_s3)["failed"]) == 1
 
 
 def test_gbp_timeout_is_unknown_outcome_ledger_stays_queued(fake_s3, social_profile_dir, monkeypatch, gbp_calls):
