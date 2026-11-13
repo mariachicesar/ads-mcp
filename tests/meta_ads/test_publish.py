@@ -240,7 +240,7 @@ def test_schedule_page_reel_dry_run_makes_no_calls(reel_env, fixed_now, tmp_path
 # ── list_scheduled_page_videos + registration ────────────────────────────────
 
 
-def test_list_scheduled_page_videos_filters_and_converts(publish_env, monkeypatch):
+def test_list_scheduled_page_videos_filters_and_converts(publish_env, monkeypatch, fake_s3):
     rows = [
         {"id": "v1", "title": "keep", "published": False, "scheduled_publish_time": NOON_NOV12_PT},
         {"id": "v2", "title": "live", "published": True},
@@ -257,6 +257,49 @@ def test_list_scheduled_page_videos_filters_and_converts(publish_env, monkeypatc
     assert r["mode"] == "read"
     assert [v["id"] for v in r["data"]["videos"]] == ["v1"]
     assert r["data"]["videos"][0]["scheduledPacific"] == "2026-11-12T12:00:00-08:00"
+
+
+def _ledger(fake_s3, platforms):
+    fake_s3.objects["ledger/el-cuis.json"] = json.dumps(
+        {"songs": {"a": {"files": ["sha"], "platforms": platforms}}}).encode()
+
+
+def test_list_scheduled_page_videos_includes_queued_reels(publish_env, monkeypatch, fake_s3):
+    # Graph's {page}/videos and {page}/video_reels edges both omit scheduled Reels,
+    # so Reels the posting log has as queued are looked up by id.
+    _ledger(fake_s3, {"facebook": {"state": "queued", "ref": "reel1"},
+                      "instagram": {"state": "queued", "ref": "not-a-video"}})
+    calls = []
+
+    def graph_request(config, method, path, *, params=None, access_token=None, tool=None, **kw):
+        calls.append(path)
+        if path == "999/videos":
+            return {"data": []}
+        assert (method, path, access_token) == ("GET", "reel1", "page-tok")
+        return {"id": "reel1", "description": "d", "published": False,
+                "scheduled_publish_time": "2026-11-13T03:00:00+0000"}
+
+    monkeypatch.setattr(publish, "_graph_request", graph_request)
+    videos = publish.list_scheduled_page_videos(_req({}), None)["data"]["videos"]
+
+    assert calls == ["999/videos", "reel1"]
+    assert [(v["id"], v["scheduledPacific"]) for v in videos] == [("reel1", "2026-11-12T19:00:00-08:00")]
+
+
+def test_list_scheduled_page_videos_skips_published_and_listed_reels(publish_env, monkeypatch, fake_s3):
+    _ledger(fake_s3, {"facebook": {"state": "queued", "ref": "v1"}})
+    rows = [{"id": "v1", "published": False, "scheduled_publish_time": NOON_NOV12_PT}]
+    calls = []
+
+    def graph_request(config, method, path, **kw):
+        calls.append(path)
+        return {"data": rows}
+
+    monkeypatch.setattr(publish, "_graph_request", graph_request)
+    videos = publish.list_scheduled_page_videos(_req({}), None)["data"]["videos"]
+
+    assert calls == ["999/videos"]  # already listed, no second lookup
+    assert [v["id"] for v in videos] == ["v1"]
 
 
 def test_list_scheduled_page_videos_blocks_other_page(publish_env):
@@ -278,7 +321,7 @@ def test_mcp_tools_registered():
         assert hasattr(server, name)
 
 
-def test_list_scheduled_page_videos_accepts_graph_datetime_strings(publish_env, monkeypatch):
+def test_list_scheduled_page_videos_accepts_graph_datetime_strings(publish_env, monkeypatch, fake_s3):
     rows = [
         {"id": "late", "published": False, "scheduled_publish_time": "2026-11-13T20:00:00+0000"},
         {"id": "early", "published": False, "scheduled_publish_time": NOON_NOV12_PT},

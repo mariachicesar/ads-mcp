@@ -213,9 +213,20 @@ def list_scheduled_page_videos(request: ToolRequest, request_id: str | None) -> 
         raise _invalid(f"Page {page_id} is not the configured Page {config.get('page_id')}.", tool)
 
     page_token = get_page_access_token(config, page_id=page_id, tool=tool)
+    fields = "id,title,description,scheduled_publish_time,published,created_time"
     rows = _graph_request(config, "GET", f"{page_id}/videos", access_token=page_token, tool=tool, params={
-        "fields": "id,title,description,scheduled_publish_time,published,created_time", "limit": "100",
+        "fields": fields, "limit": "100",
     }).get("data", [])
+    # Graph leaves scheduled Reels out of both {page}/videos and {page}/video_reels,
+    # so look up each Reel the posting log has as queued by its id.
+    listed = {str(row.get("id")) for row in rows}
+    for song in social_ledger.load(request.businessKey)["songs"].values():
+        fb = song.get("platforms", {}).get("facebook") or {}
+        ref = str(fb.get("ref") or "")
+        if fb.get("state") == "queued" and ref and ref not in listed:
+            listed.add(ref)
+            rows.append(_graph_request(config, "GET", ref, access_token=page_token, tool=tool,
+                                       params={"fields": fields}))
     videos = []
     for row in rows:
         if row.get("published") is False and row.get("scheduled_publish_time"):
