@@ -64,7 +64,9 @@ def social_profile_dir(monkeypatch, tmp_path) -> Path:
 
     d = tmp_path / "social_profiles"
     d.mkdir()
-    src = Path(__file__).resolve().parent.parent / "social" / "profiles" / "el-cuis.json"
+    # A frozen test copy, not social/profiles/el-cuis.json: editing the live profile
+    # (e.g. enabling a platform) must not change what the tests see.
+    src = Path(__file__).resolve().parent / "fixtures" / "social_profiles" / "el-cuis.json"
     shutil.copy(src, d / "el-cuis.json")
     monkeypatch.setenv("ADS_MCP_SOCIAL_PROFILES_DIR", str(d))
     return d
