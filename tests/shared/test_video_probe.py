@@ -81,6 +81,26 @@ def test_extract_frame_runs_ffmpeg(which, monkeypatch, tmp_path):
     assert cmd.index("-ss") < cmd.index("-i") and cmd[-1] == str(out)
 
 
+def test_subprocesses_never_inherit_stdin(which, monkeypatch, tmp_path):
+    # Inside an MCP stdio server, stdin is the JSON-RPC pipe: an inherited stdin makes
+    # ffmpeg wait for keyboard input until the timeout.
+    out = tmp_path / "f.jpg"
+    kwargs = []
+
+    def run(cmd, **kw):
+        kwargs.append((cmd, kw))
+        out.write_bytes(b"jpg")
+        return _Done(stdout=_ffprobe_json(1080, 1920, 28))
+    monkeypatch.setattr(video_probe.subprocess, "run", run)
+
+    video_probe.probe("a.mp4")
+    video_probe.extract_frame("a.mp4", str(out), at_seconds=7)
+
+    for cmd, kw in kwargs:
+        assert kw.get("stdin") is subprocess.DEVNULL, cmd[0]
+    assert "-nostdin" in kwargs[1][0]
+
+
 def test_extract_frame_raises_without_ffmpeg(monkeypatch, tmp_path):
     monkeypatch.setattr(video_probe.shutil, "which", lambda name: None)
 

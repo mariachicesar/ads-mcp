@@ -25,7 +25,8 @@ def probe(path: str) -> dict[str, Any] | None:
            "-show_entries", "stream=width,height:stream_side_data=rotation:stream_tags=rotate:format=duration",
            "-of", "json", path]
     try:
-        done = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT_SECONDS)
+        done = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                              timeout=TIMEOUT_SECONDS)
         if done.returncode != 0:
             return None
         info = json.loads(done.stdout)
@@ -51,10 +52,13 @@ def extract_frame(path: str, out_path: str, *, at_seconds: float) -> str:
     if not ffmpeg:
         raise RuntimeError("ffmpeg is not installed or not on PATH.")
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
-    cmd = [ffmpeg, "-y", "-v", "error", "-ss", f"{at_seconds:g}", "-i", path,
+    # -nostdin and stdin=DEVNULL: in an MCP stdio server stdin is the JSON-RPC pipe, and
+    # ffmpeg reading it for keyboard commands hangs until the timeout.
+    cmd = [ffmpeg, "-nostdin", "-y", "-v", "error", "-ss", f"{at_seconds:g}", "-i", path,
            "-frames:v", "1", "-vf", "scale=1200:-2", "-q:v", "3", out_path]
     try:
-        done = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT_SECONDS)
+        done = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                              timeout=TIMEOUT_SECONDS)
     except (OSError, subprocess.SubprocessError) as exc:
         raise RuntimeError(f"ffmpeg failed: {exc}") from exc
     if done.returncode != 0 or not os.path.isfile(out_path):
