@@ -97,7 +97,14 @@ All seven servers start on ports 8001-8007 with signed-request validation disabl
 
 ## Connecting Claude Desktop
 
-Each server has a `mcp_server.py` that speaks the MCP stdio protocol. Add them to your Claude Desktop config file:
+Each server has a `mcp_server.py` that speaks the MCP stdio protocol. Add them to your Claude Desktop config file.
+
+**Do not put credentials in this file.** Servers read them from AWS Secrets Manager
+(`/ads-mcp/{business_key}/{platform}/config`) using your `~/.aws` credentials. An inline
+`*_CONFIGS_JSON` env var overrides Secrets Manager and goes stale. See
+[docs/CREDENTIALS_AND_TROUBLESHOOTING.md](docs/CREDENTIALS_AND_TROUBLESHOOTING.md).
+
+Config file locations:
 
 - **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
@@ -109,7 +116,6 @@ Each server has a `mcp_server.py` that speaks the MCP stdio protocol. Add them t
       "command": "/absolute/path/to/.venv/bin/python",
       "args": ["/absolute/path/to/ads-mcp/servers/google-ads/mcp_server.py"],
       "env": {
-        "ADS_MCP_GOOGLE_ADS_CONFIGS_JSON": "<paste contents of local-dev-config.json here>",
         "ADS_MCP_REQUIRE_SIGNED_REQUESTS": "false"
       }
     },
@@ -117,7 +123,6 @@ Each server has a `mcp_server.py` that speaks the MCP stdio protocol. Add them t
       "command": "/absolute/path/to/.venv/bin/python",
       "args": ["/absolute/path/to/ads-mcp/servers/analytics/mcp_server.py"],
       "env": {
-        "ADS_MCP_ANALYTICS_CONFIGS_JSON": "<paste contents of local-dev-config.json here>",
         "ADS_MCP_REQUIRE_SIGNED_REQUESTS": "false"
       }
     },
@@ -125,7 +130,6 @@ Each server has a `mcp_server.py` that speaks the MCP stdio protocol. Add them t
       "command": "/absolute/path/to/.venv/bin/python",
       "args": ["/absolute/path/to/ads-mcp/servers/search-console/mcp_server.py"],
       "env": {
-        "ADS_MCP_SEARCH_CONSOLE_CONFIGS_JSON": "<paste contents of local-dev-config.json here>",
         "ADS_MCP_REQUIRE_SIGNED_REQUESTS": "false"
       }
     },
@@ -133,16 +137,13 @@ Each server has a `mcp_server.py` that speaks the MCP stdio protocol. Add them t
       "command": "/absolute/path/to/.venv/bin/python",
       "args": ["/absolute/path/to/ads-mcp/servers/content-agent/mcp_server.py"],
       "env": {
-        "ADS_MCP_GOOGLE_ADS_CONFIGS_JSON": "<paste contents of local-dev-config.json here>",
-        "ANTHROPIC_API_KEY": "sk-ant-...",
-        "ADS_MCP_REQUIRE_SIGNED_REQUESTS": "false"
+                "ADS_MCP_REQUIRE_SIGNED_REQUESTS": "false"
       }
     },
     "gbp": {
       "command": "/absolute/path/to/.venv/bin/python",
       "args": ["/absolute/path/to/ads-mcp/servers/gbp/mcp_server.py"],
       "env": {
-        "ADS_MCP_GBP_CONFIGS_JSON": "<paste contents of local-dev-config.json here>",
         "ADS_MCP_REQUIRE_SIGNED_REQUESTS": "false"
       }
     },
@@ -158,6 +159,9 @@ Each server has a `mcp_server.py` that speaks the MCP stdio protocol. Add them t
 ```
 
 On **Windows**, use the `.venv\Scripts\python.exe` path and backslashes in paths, or use forward slashes — both work in JSON. Restart Claude Desktop after editing the config.
+
+`content-agent` reads `ANTHROPIC_API_KEY` from the environment only. Set it as a user
+environment variable (Windows: System Properties → Environment Variables), not in this file.
 
 ---
 

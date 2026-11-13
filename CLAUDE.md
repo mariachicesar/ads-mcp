@@ -110,6 +110,7 @@ Infrastructure requirements:
 | `docs/INTEGRATION_CONTRACT.md` | HMAC signing scheme, dry-run contract, approval flow |
 | `docs/BACKEND_RC_PHASE1_SPEC.md` | Phase 1 single-action request/approval DB spec |
 | `docs/WORKFLOW_RUNS.md` | Phase 3 multi-step workflow run architecture |
+| `docs/CREDENTIALS_AND_TROUBLESHOOTING.md` | Where credentials live (Secrets Manager only), config resolution order, known failure modes, pre-flight checklist for social posting |
 
 ---
 
